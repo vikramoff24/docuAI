@@ -1,0 +1,37 @@
+{
+  "name": "docuflow-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DocuFlow AI — Enterprise Document Management System",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "build": "pnpm --filter './packages/*' build && pnpm --filter './apps/*' build",
+    "lint": "pnpm --recursive lint",
+    "lint:fix": "pnpm --recursive lint:fix",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test",
+    "test:unit": "pnpm --recursive test:unit",
+    "test:integration": "pnpm --recursive test:integration",
+    "test:e2e": "pnpm --filter './apps/web' test:e2e",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .prettierignore",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .prettierignore",
+    "db:generate": "pnpm --filter '@docuflow/database' db:generate",
+    "db:migrate": "pnpm --filter '@docuflow/database' db:migrate",
+    "db:migrate:dev": "pnpm --filter '@docuflow/database' db:migrate:dev",
+    "db:studio": "pnpm --filter '@docuflow/database' db:studio",
+    "db:seed": "pnpm --filter '@docuflow/database' db:seed",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "infra:reset": "docker compose down -v && docker compose up -d"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0"
+  }
+}

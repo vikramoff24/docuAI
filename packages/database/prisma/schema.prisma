@@ -1,0 +1,405 @@
+// This is your Prisma schema file.
+// Learn more about Prisma schemas: https://pris.ly/d/prisma-schema
+//
+// DocuFlow AI — Complete Data Model
+//
+// Design principles:
+// 1. Every tenant-owned resource has organizationId (FK, indexed)
+// 2. UUIDs as primary keys (globally unique, no integer enumeration attacks)
+// 3. createdAt/updatedAt on all tables (audit trail)
+// 4. Soft deletes (deletedAt) on documents, folders (recoverable)
+// 5. JSONB metadata columns for flexible additional data
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum OrganizationPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum OrganizationMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum DocumentStatus {
+  PENDING       // Just uploaded, awaiting confirmation
+  PROCESSING    // Worker is extracting text + generating embeddings
+  READY         // Fully processed, searchable
+  FAILED        // Processing failed (check processingError field)
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum AuditAction {
+  // Auth
+  USER_REGISTERED
+  USER_LOGGED_IN
+  USER_LOGGED_OUT
+  USER_PASSWORD_CHANGED
+
+  // Organization
+  ORG_CREATED
+  ORG_UPDATED
+  ORG_MEMBER_INVITED
+  ORG_MEMBER_ROLE_CHANGED
+  ORG_MEMBER_REMOVED
+
+  // Documents
+  DOCUMENT_CREATED
+  DOCUMENT_UPDATED
+  DOCUMENT_DELETED
+  DOCUMENT_RESTORED
+  DOCUMENT_DOWNLOADED
+  DOCUMENT_SHARED
+  DOCUMENT_MOVED
+
+  // Folders
+  FOLDER_CREATED
+  FOLDER_UPDATED
+  FOLDER_DELETED
+  FOLDER_MOVED
+
+  // AI
+  AI_SUMMARY_GENERATED
+  AI_QUESTION_ASKED
+  AI_AGENT_ACTION
+}
+
+// ============================================================
+// USERS
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  firstName    String?
+  lastName     String?
+  avatarUrl    String?
+  emailVerifiedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  memberships       OrganizationMember[]
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+  conversations     Conversation[]
+  createdDocuments  Document[]        @relation("CreatedByUser")
+  createdFolders    Folder[]          @relation("CreatedByUser")
+  documentShares    DocumentShare[]   @relation("SharedByUser")
+  receivedShares    DocumentShare[]   @relation("SharedWithUser")
+  invitationsSent   Invitation[]      @relation("InvitedByUser")
+
+  @@map("users")
+}
+
+// ============================================================
+// REFRESH TOKENS
+// Stored hashed in DB for refresh token rotation + revocation
+// ============================================================
+
+model RefreshToken {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  tokenHash   String   @unique  // bcrypt hash of the actual token
+  family      String   // Token family for rotation attack detection
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  userAgent   String?
+  ipAddress   String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
+// ============================================================
+// ORGANIZATIONS
+// ============================================================
+
+model Organization {
+  id          String           @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String           @unique  // URL-safe identifier: "acme-corp"
+  plan        OrganizationPlan @default(FREE)
+  logoUrl     String?
+  settings    Json             @default("{}")  // Flexible org settings
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  members     OrganizationMember[]
+  invitations Invitation[]
+  folders     Folder[]
+  documents   Document[]
+  auditLogs   AuditLog[]
+  conversations Conversation[]
+
+  @@map("organizations")
+}
+
+// ============================================================
+// ORGANIZATION MEMBERS
+// Join table: User ↔ Organization with role
+// ============================================================
+
+model OrganizationMember {
+  id             String                 @id @default(uuid()) @db.Uuid
+  userId         String                 @db.Uuid
+  organizationId String                 @db.Uuid
+  role           OrganizationMemberRole @default(MEMBER)
+  joinedAt       DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // A user can only have one role per organization
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+// ============================================================
+// INVITATIONS
+// Pending email invitations to join an organization
+// ============================================================
+
+model Invitation {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  email          String
+  role           OrganizationMemberRole @default(MEMBER)
+  token          String           @unique  // Sent in invitation email
+  status         InvitationStatus @default(PENDING)
+  invitedById    String           @db.Uuid
+  expiresAt      DateTime
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedByUser", fields: [invitedById], references: [id])
+
+  @@index([organizationId])
+  @@index([token])
+  @@map("invitations")
+}
+
+// ============================================================
+// FOLDERS
+// Self-referential tree structure for folder hierarchy
+// ============================================================
+
+model Folder {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid   // TENANT BOUNDARY
+  parentId       String?   @db.Uuid   // null = root folder
+  name           String
+  path           String    // Materialized path: "/root/sub/leaf" for fast queries
+  createdById    String    @db.Uuid
+  deletedAt      DateTime? // Soft delete
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Folder?      @relation("FolderChildren", fields: [parentId], references: [id])
+  children     Folder[]     @relation("FolderChildren")
+  documents    Document[]
+  createdBy    User         @relation("CreatedByUser", fields: [createdById], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, parentId])  // Composite: find children within org
+  @@index([path])                      // For path-based queries
+  @@map("folders")
+}
+
+// ============================================================
+// DOCUMENTS
+// Core document record (metadata only; bytes live in S3)
+// ============================================================
+
+model Document {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @db.Uuid   // TENANT BOUNDARY
+  folderId        String?        @db.Uuid
+  name            String
+  description     String?
+  mimeType        String
+  sizeBytes       BigInt
+  storageKey      String         // S3 object key: "organizations/{orgId}/documents/{docId}/{filename}"
+  status          DocumentStatus @default(PENDING)
+  processingError String?        // Error message if status = FAILED
+  tags            String[]       // Array of tags for filtering
+  metadata        Json           @default("{}")  // Custom metadata (JSONB)
+  createdById     String         @db.Uuid
+  deletedAt       DateTime?      // Soft delete
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  folder       Folder?         @relation(fields: [folderId], references: [id])
+  createdBy    User            @relation("CreatedByUser", fields: [createdById], references: [id])
+  chunks       DocumentChunk[]
+  shares       DocumentShare[]
+
+  // NOTE: tsvector column and GIN full-text index are added via raw SQL migration
+  // They cannot be managed by Prisma schema directly
+
+  @@index([organizationId])
+  @@index([organizationId, folderId])   // List documents in a folder
+  @@index([organizationId, status])     // Filter by processing status
+  @@index([organizationId, createdAt(sort: Desc)])  // Recent documents
+  // NOTE: GIN indexes on tags[] and tsvector are created via raw SQL in migration files
+  // because Prisma doesn't support all GIN index configurations directly
+  @@map("documents")
+}
+
+// ============================================================
+// DOCUMENT CHUNKS
+// Chunks of document text with vector embeddings (for RAG)
+// ============================================================
+
+model DocumentChunk {
+  id             String   @id @default(uuid()) @db.Uuid
+  documentId     String   @db.Uuid
+  organizationId String   @db.Uuid   // Denormalized for efficient tenant-scoped vector search
+  content        String   // The actual text of this chunk
+  chunkIndex     Int      // Position in document (0-based)
+  tokenCount     Int      // Approximate token count (for context window management)
+  metadata       Json     @default("{}")  // page number, section heading, etc.
+  // NOTE: embedding vector(1536) is added via raw SQL migration
+  // Prisma doesn't natively support the pgvector type yet without Unsupported()
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([organizationId])
+  // HNSW vector index created via raw SQL in migration:
+  // CREATE INDEX ON document_chunks USING hnsw (embedding vector_cosine_ops)
+  // WITH (m = 16, ef_construction = 64);
+  @@map("document_chunks")
+}
+
+// ============================================================
+// DOCUMENT SHARES
+// Sharing documents with specific users or generating share links
+// ============================================================
+
+model DocumentShare {
+  id           String    @id @default(uuid()) @db.Uuid
+  documentId   String    @db.Uuid
+  sharedById   String    @db.Uuid
+  sharedWithId String?   @db.Uuid  // null = public link
+  token        String?   @unique   // For public share links
+  canDownload  Boolean   @default(true)
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sharedBy   User     @relation("SharedByUser", fields: [sharedById], references: [id])
+  sharedWith User?    @relation("SharedWithUser", fields: [sharedWithId], references: [id])
+
+  @@index([documentId])
+  @@index([token])
+  @@map("document_shares")
+}
+
+// ============================================================
+// AI CONVERSATIONS
+// Chat sessions for document Q&A
+// ============================================================
+
+model Conversation {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid   // TENANT BOUNDARY
+  userId         String   @db.Uuid
+  title          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+  messages     Message[]
+
+  @@index([organizationId, userId])
+  @@map("conversations")
+}
+
+// ============================================================
+// MESSAGES
+// Individual messages within a conversation (user + AI turns)
+// ============================================================
+
+model Message {
+  id             String      @id @default(uuid()) @db.Uuid
+  conversationId String      @db.Uuid
+  role           MessageRole
+  content        String
+  // Metadata: tool calls, citations, token usage, model used
+  metadata       Json        @default("{}")
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+// ============================================================
+// AUDIT LOGS
+// Immutable record of all significant actions
+// Never soft-deleted; kept for compliance
+// ============================================================
+
+model AuditLog {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid   // TENANT BOUNDARY
+  userId         String?     @db.Uuid   // null for system actions
+  action         AuditAction
+  resourceType   String?     // "document", "folder", "member", etc.
+  resourceId     String?     // ID of the resource affected
+  metadata       Json        @default("{}")  // Before/after state, IPs, etc.
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, userId])
+  @@index([organizationId, action])
+  @@index([organizationId, createdAt(sort: Desc)])  // Recent activity feed
+  @@map("audit_logs")
+}

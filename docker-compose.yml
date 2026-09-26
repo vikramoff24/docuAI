@@ -1,0 +1,166 @@
+# DocuFlow AI — Local Development Infrastructure
+#
+# Services:
+#   - PostgreSQL 16 with pgvector extension
+#   - Redis 7 (cache + BullMQ queues)
+#   - LocalStack (S3-compatible storage)
+#   - Adminer (PostgreSQL web UI, dev only)
+#   - Redis Commander (Redis web UI, dev only)
+#
+# Usage:
+#   pnpm infra:up      → Start all services
+#   pnpm infra:down    → Stop all services
+#   pnpm infra:logs    → Tail logs
+#   pnpm infra:reset   → Destroy volumes and restart (DESTRUCTIVE)
+
+version: '3.9'
+
+networks:
+  docuflow-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  localstack-data:
+    driver: local
+
+services:
+  # ============================================================
+  # PostgreSQL 16 with pgvector
+  #
+  # Why pgvector/pgvector:pg16 instead of postgres:16?
+  # The pgvector image is postgres:16 with the pgvector extension
+  # pre-installed. We still need to CREATE EXTENSION in the DB,
+  # but the shared library is already available.
+  # ============================================================
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: docuflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: docuflow
+      POSTGRES_PASSWORD: docuflow_secret
+      POSTGRES_DB: docuflow_dev
+      # Allow trust auth for local dev (never in production!)
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - docuflow-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docuflow -d docuflow_dev']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ============================================================
+  # Redis 7
+  #
+  # Used for:
+  # 1. BullMQ job queues (document processing, email, etc.)
+  # 2. JWT access token blocklist (logout/revocation)
+  # 3. Rate limiting counters
+  # 4. Session caching
+  #
+  # Why AOF (appendonly yes)?
+  # Redis by default only persists to disk every second (RDB snapshots).
+  # AOF writes every command to a log — much lower data loss on crash.
+  # For BullMQ queues, losing jobs on Redis restart would be catastrophic.
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: docuflow-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis_secret
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    networks:
+      - docuflow-network
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'redis_secret', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # LocalStack (AWS S3 emulation)
+  #
+  # LocalStack provides a local AWS API. We only use S3 here.
+  # In production, replace with real AWS S3 credentials.
+  #
+  # S3 bucket is auto-created by the init script.
+  # ============================================================
+  localstack:
+    image: localstack/localstack:3
+    container_name: docuflow-localstack
+    restart: unless-stopped
+    ports:
+      - '4566:4566'   # LocalStack edge port (all AWS services on one port)
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      LOCALSTACK_HOST: localstack
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./infra/localstack/init-s3.sh:/etc/localstack/init/ready.d/01-init-s3.sh
+    networks:
+      - docuflow-network
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ============================================================
+  # Adminer — Database Web UI (DEV ONLY)
+  # Access: http://localhost:8080
+  # System: PostgreSQL, Server: postgres, User: docuflow, Password: docuflow_secret
+  # ============================================================
+  adminer:
+    image: adminer:latest
+    container_name: docuflow-adminer
+    restart: unless-stopped
+    ports:
+      - '8080:8080'
+    environment:
+      ADMINER_DESIGN: pepa-linha-dark
+      ADMINER_DEFAULT_SERVER: postgres
+    networks:
+      - docuflow-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+
+  # ============================================================
+  # Redis Commander — Redis Web UI (DEV ONLY)
+  # Access: http://localhost:8081
+  # ============================================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: docuflow-redis-commander
+    restart: unless-stopped
+    ports:
+      - '8081:8081'
+    environment:
+      REDIS_HOSTS: 'local:redis:6379:0:redis_secret'
+    networks:
+      - docuflow-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - tools

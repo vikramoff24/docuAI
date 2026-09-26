@@ -1,0 +1,27 @@
+{
+  "name": "@docuflow/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma database client and schema for DocuFlow AI",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:reset": "prisma migrate reset",
+    "db:studio": "prisma studio",
+    "db:seed": "ts-node --compiler-options '{\"module\":\"commonjs\"}' prisma/seed.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0"
+  },
+  "devDependencies": {
+    "@docuflow/config": "workspace:*",
+    "prisma": "^5.20.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.5.0"
+  }
+}

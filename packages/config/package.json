@@ -1,0 +1,14 @@
+{
+  "name": "@docuflow/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared configuration for DocuFlow AI monorepo",
+  "main": "./tsconfig.base.json",
+  "exports": {
+    "./tsconfig": "./tsconfig.base.json",
+    "./prettier": "./prettier.config.js",
+    "./eslint-base": "./eslint-base.js",
+    "./eslint-nestjs": "./eslint-nestjs.js",
+    "./eslint-next": "./eslint-next.js"
+  }
+}
