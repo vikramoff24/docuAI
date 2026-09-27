@@ -7,18 +7,20 @@
 
 ## Current Phase
 
-**Phase 0 — Foundation & Architecture Setup** (and Initial Phase 1 Auth/DB Scaffolding) ⏸️ PAUSED AT CHECKPOINT
+**Phase 0 — Foundation & Architecture Setup** ✅ COMPLETE  
+**Phase 1 — Auth & Organizations** 🚧 IN PROGRESS (core auth logic written & tested)
 
 ---
 
 ## Current Objective
 
-Monorepo scaffolding, configuration, infrastructure definitions, and core API Auth/DB foundation have been created. Paused for safe checkpoint.
+Phase 0 is fully complete. All infrastructure is running, migrations applied, seed data loaded, API responding, and both web and worker apps bootstrapped. Moving into Phase 1 completion.
 
 ---
 
 ## Current Task Status
 
+### Phase 0 (COMPLETE ✅)
 - [x] Inspect repository
 - [x] Initialize git
 - [x] Create monorepo with pnpm workspaces
@@ -28,28 +30,40 @@ Monorepo scaffolding, configuration, infrastructure definitions, and core API Au
 - [x] Bootstrap NestJS API app with Auth, Users, Organizations, and Database modules
 - [x] Implement Auth module (registration, login, JWT + Local strategies, guards, bcrypt hashing)
 - [x] Implement AuthService unit test suite (6/6 tests passing)
-- [ ] Install Docker Desktop on host (requires manual sudo/installer)
-- [ ] Resolve `passport-local` package in `apps/api` and `tsconfig.json` in `packages/database`
-- [ ] Start Docker infrastructure (`pnpm infra:up`)
-- [ ] Run initial Prisma database migration (`pnpm db:migrate:dev`)
-- [ ] Bootstrap Next.js 15 Web app (`apps/web`)
-- [ ] Bootstrap BullMQ Worker app (`apps/worker`)
+- [x] Fix `passport-local` package in `apps/api`
+- [x] Fix tsconfig.json in `packages/database` and `apps/worker` (inlined options)
+- [x] Start Docker infrastructure (`docker compose up -d` — all 3 containers healthy)
+- [x] Run initial Prisma database migration (`20260927182727_init`)
+- [x] Seed database with test users and organizations
+- [x] Bootstrap Next.js 16 Web app (`apps/web`) — stunning dark landing page
+- [x] Bootstrap BullMQ Worker app (`apps/worker`) — document processing pipeline scaffold
+- [x] Verify `GET /api/v1/health` returns `{ status: 'ok', services: { database: 'ok' } }`
+- [x] Full monorepo typecheck passes (5 packages clean)
+- [x] All tests pass (6 API unit tests + worker passWithNoTests)
+
+### Phase 1 (IN PROGRESS 🚧)
+- [x] Auth module (register, login, JWT + Local strategies) — written and tested
+- [ ] Refresh token rotation (currently stores in DB but rotation logic incomplete)
+- [ ] Token revocation (Redis blacklist)
+- [ ] Organization invite flow (Invitation model exists, controller TBD)
+- [ ] Auth integration tests (requires running DB)
+- [ ] Cross-tenant access prevention tests
 
 ---
 
 ## Overall Progress
 
 ```
-Phase 0: Foundation          ██████████████░░░░░░  70% (paused)
-Phase 1: Auth + Orgs         ████████░░░░░░░░░░░░  40% (auth logic written & tested)
-Phase 2: Documents           ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 3: Document Pipeline   ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 4: Search              ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 5: AI (RAG)            ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 6: AI Agent            ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 8: Observability       ░░░░░░░░░░░░░░░░░░░░   0%
-Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░░░░   0%
+Phase 0: Foundation          ████████████████████  100% ✅
+Phase 1: Auth + Orgs         ████████░░░░░░░░░░░░   40% (auth logic written & tested)
+Phase 2: Documents           ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 3: Document Pipeline   ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 4: Search              ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 5: AI (RAG)            ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 6: AI Agent            ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 8: Observability       ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░░░░    0%
 ```
 
 ---
@@ -63,25 +77,41 @@ Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░
 - [x] Complete Prisma schema (`packages/database/prisma/schema.prisma`) with models:
   - `User`, `RefreshToken`, `Organization`, `OrganizationMember`, `Invitation`
   - `Folder`, `Document`, `DocumentChunk`, `DocumentShare`, `Conversation`, `Message`, `AuditLog`
-- [x] Database seed script (`packages/database/prisma/seed.ts`)
-- [x] Local infrastructure definitions:
+- [x] Database seed script (`packages/database/prisma/seed.ts`) — seeded 5 users, 2 orgs
+- [x] Database package public exports (`packages/database/src/index.ts`)
+- [x] Local infrastructure running:
   - `docker-compose.yml` (Postgres 16 + pgvector, Redis 7, LocalStack, Adminer)
   - `infra/postgres/init.sql` (pgvector & pg_trgm extensions, db init)
   - `infra/localstack/init-s3.sh` (S3 bucket initialization)
-- [x] NestJS API (`apps/api`):
+  - All 3 containers healthy and running
+- [x] Prisma migration `20260927182727_init` applied to `docuflow_dev` database
+- [x] NestJS API (`apps/api` — port 3001):
   - `DatabaseModule` & `DatabaseService` extending `PrismaClient` with logging & health check
   - `AuthModule` with registration, login, JWT strategy, Local strategy, `RolesGuard`, `JwtAuthGuard`
   - `UsersModule` and `OrganizationsModule`
   - Global `AllExceptionsFilter`, `LoggingInterceptor`, `TransformInterceptor`
+  - `GET /api/v1/health` returns `{ status: 'ok', services: { database: 'ok' } }`
   - Unit tests for `AuthService` in `apps/api/src/auth/auth.service.spec.ts` (6/6 passing)
+- [x] Next.js 16 Web app (`apps/web` — port 3000):
+  - Stunning dark landing page with glassmorphism, mesh gradients, animations
+  - Hero, features grid, mock product UI, how-it-works, pricing, CTA, footer
+  - CSS-only design system in `globals.css`
+- [x] BullMQ Worker app (`apps/worker` — port 3002):
+  - `WorkerModule` with BullMQ/Redis configuration
+  - `DocumentProcessingModule` with exponential backoff queue config
+  - `DocumentProcessingConsumer` with stage-based pipeline (placeholder)
+  - `DocumentProcessingService` (extract → chunk → embed → store pipeline skeleton)
 
 ---
 
-## In Progress / Paused
+## In Progress / Next Session
 
-- Host Docker setup (Docker Desktop needs to be installed/running on the macOS system)
-- Typecheck fixes in `apps/api` (missing `passport-local`) and `packages/database` (tsconfig rootDir)
-- Bootstrapping `apps/web` and `apps/worker`
+- Phase 1 completion:
+  - Refresh token rotation endpoint (`POST /auth/refresh`)
+  - Token revocation via Redis blacklist
+  - Organization invitation API
+  - Auth integration tests
+- Phase 2: Document management (upload, CRUD, S3 presigned URLs)
 
 ---
 
@@ -97,23 +127,23 @@ See `tasks/roadmap.md` and `tasks/current-phase.md`.
 DocuFlow AI — Modular Monolith
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 apps/
-  web/        → Next.js 15, TypeScript, Tailwind, shadcn/ui (pending bootstrap)
-  api/        → NestJS, TypeScript, Prisma, Passport, Fastify/Express (bootstrapped)
-  worker/     → NestJS (lightweight), BullMQ workers (pending bootstrap)
+  web/        → Next.js 16, TypeScript, Tailwind v4 (✅ running port 3000)
+  api/        → NestJS, TypeScript, Prisma, Passport, Fastify (✅ running port 3001)
+  worker/     → NestJS (lightweight), BullMQ workers (✅ bootstrapped port 3002)
 
 packages/
-  database/   → Prisma schema (11 models), seed, migrations (schema created)
-  ai/         → AI provider abstraction (OpenAI/Anthropic/Gemini) (planned)
-  storage/    → S3-compatible storage abstraction (planned)
+  database/   → Prisma schema (11 models), seed, migrations (✅ migrated & seeded)
+  ai/         → AI provider abstraction (OpenAI/Anthropic/Gemini) (planned Phase 5)
+  storage/    → S3-compatible storage abstraction (planned Phase 2)
   shared/     → Shared types, constants, utilities (planned)
-  config/     → Shared ESLint, TypeScript, prettier configs (created)
+  config/     → Shared ESLint, TypeScript, prettier configs (✅ created)
   ui/         → Shared React component library (planned)
 
-Infrastructure (local dev):
-  PostgreSQL 16 + pgvector
-  Redis 7
-  LocalStack (S3-compatible)
-  Adminer (DB Web GUI)
+Infrastructure (local dev — ALL RUNNING ✅):
+  PostgreSQL 16 + pgvector  (port 5432)
+  Redis 7                   (port 6379)
+  LocalStack (S3-compatible) (port 4566)
+  Adminer (DB Web GUI)       (port 8080)
 ```
 
 ---
@@ -136,21 +166,20 @@ Infrastructure (local dev):
 
 ## Recent Changes
 
-- 2026-09-27: Paused development for safe checkpoint. Monorepo scaffolding, Prisma schema, Docker compose configuration, NestJS API auth/org/users modules, and auth unit tests verified.
+- 2026-09-28: Phase 0 COMPLETE. Fixed all typecheck errors (passport-local, tsconfig inlining). Started Docker infrastructure. Applied Prisma migration. Seeded database. Verified API health endpoint. Bootstrapped Next.js 16 web app with stunning landing page. Bootstrapped BullMQ worker app.
 
 ---
 
 ## Known Issues & Errors
 
-1. **Docker not running**: Docker Desktop is not yet installed / running on the macOS host (brew cask install was cancelled because it requires interactive sudo).
-2. **Missing `passport-local` in `apps/api`**: `src/auth/strategies/local.strategy.ts` requires `passport-local` and `@types/passport-local` to be added to `apps/api/package.json`.
-3. **TypeScript rootDir error in `packages/database`**: `packages/database/tsconfig.json` specifies `"rootDir": "./src"`, but `prisma/seed.ts` is in `prisma/` and `packages/database/src/index.ts` is not yet created.
+None. All typecheck, tests, and infrastructure verified clean.
 
 ---
 
 ## Technical Debt
 
-None yet (early scaffolding phase).
+1. **tsconfig extends**: `packages/config/tsconfig.base.json` isn't used by `apps/api`, `apps/worker`, or `packages/database` because ts-node/jest can't resolve workspace paths. Each app has inlined tsconfig options. This is standard for NestJS monorepos — low priority.
+2. **Worker DB connection**: The worker doesn't yet have a Prisma connection. This is intentional — it will be added in Phase 3 when actual DB writes are needed.
 
 ---
 
@@ -160,9 +189,12 @@ None yet (early scaffolding phase).
 |---|---|---|
 | Node.js | ✅ v24.18.0 via NVM | Located in `~/.nvm/versions/node/v24.18.0/bin` |
 | pnpm | ✅ v9.x via NVM | Located in `~/.nvm/versions/node/v24.18.0/bin` |
-| PostgreSQL | ⏸️ Not running | `docker-compose.yml` configured; awaiting Docker daemon |
-| Redis | ⏸️ Not running | `docker-compose.yml` configured; awaiting Docker daemon |
-| LocalStack | ⏸️ Not running | `docker-compose.yml` configured; awaiting Docker daemon |
+| Docker | ✅ Running | Docker Desktop, binary at `~/.docker/bin/docker` |
+| PostgreSQL | ✅ Running | Container: `docuflow-postgres`, port 5432 |
+| Redis | ✅ Running | Container: `docuflow-redis`, port 6379 |
+| LocalStack | ✅ Running | Container: `docuflow-localstack`, port 4566 |
+| API Server | ✅ Running | Port 3001 (dev mode) |
+| Web Server | ✅ Running | Port 3000 (Next.js dev) |
 
 ---
 
@@ -175,35 +207,50 @@ Not yet deployed. Local development only.
 ## Test Status
 
 - `apps/api`: Unit tests passing (`src/auth/auth.service.spec.ts`: 6/6 passed)
-- Integration/E2E: Not yet run (requires running PostgreSQL container)
+- `apps/worker`: No tests yet (passWithNoTests configured)
+- Integration/E2E: Not yet run (Phase 1 goal)
 
 ---
 
 ## Database Migration Status
 
-- Prisma schema created (`packages/database/prisma/schema.prisma`)
-- Migrations not yet applied to database (requires running PostgreSQL container)
+- ✅ Migration `20260927182727_init` applied to `docuflow_dev`
+- ✅ Database seeded (5 users, 2 organizations, 2 root folders)
 
 ---
 
 ## Current Git Branch & Commit
 
 - Branch: `main`
-- Last checkpoint commit: `bdf60be` ("chore(checkpoint): pause development at Phase 0 foundation and API scaffolding")
+- Last checkpoint commit: `d1a6a23` ("chore(checkpoint): pause development at Phase 0 foundation and API scaffolding")
+- Upcoming commit: Phase 0 complete checkpoint
 
 ---
 
 ## Exact Next Actions for Next Session
 
-1. **Fix package and tsconfig dependencies**:
-   - In `apps/api`: add `passport-local` and `@types/passport-local`
-   - In `packages/database`: add `src/index.ts` (exporting `@prisma/client`) and adjust `tsconfig.json` rootDir
-2. **Start Docker Infrastructure**:
-   - Ensure Docker Desktop is installed and running on the machine
-   - Run `pnpm infra:up` (`docker compose up -d`) to start Postgres, Redis, LocalStack, Adminer
-3. **Run Prisma Migrations**:
-   - Run `pnpm db:migrate:dev --name init` to create and apply initial database migrations
-   - Run `pnpm db:seed` to seed initial users and organizations
-4. **Bootstrap Apps**:
-   - Run `pnpm --filter @docuflow/api dev` and verify `GET /health` returns `{ status: 'ok' }`
-   - Bootstrap `apps/web` (Next.js 15) and `apps/worker`
+1. **Complete Phase 1 Auth**:
+   - Implement `POST /auth/refresh` endpoint for refresh token rotation
+   - Add Redis token blacklisting to `AuthService.logout()`
+   - Write integration tests for auth endpoints
+   
+2. **Organization Invitations**:
+   - `POST /organizations/:id/invitations` — create invitation, send email (placeholder)
+   - `POST /invitations/:token/accept` — accept invite, create member record
+   
+3. **Phase 2 Documents**:
+   - `POST /documents/upload-url` — return presigned S3 PUT URL
+   - `POST /documents/:id/confirm` — confirm upload, trigger processing job
+   - `GET /documents` — paginated document list
+   - `GET /documents/:id` — get document with metadata
+   - `DELETE /documents/:id` — soft delete
+
+## Test Accounts (seeded)
+
+| Email | Password | Role | Org |
+|---|---|---|---|
+| alice@acme.com | Password123! | OWNER | Acme Corp |
+| bob@acme.com | Password123! | ADMIN | Acme Corp |
+| carol@acme.com | Password123! | MEMBER | Acme Corp |
+| dave@acme.com | Password123! | VIEWER | Acme Corp |
+| eve@beta.com | Password123! | OWNER | Beta Inc |
