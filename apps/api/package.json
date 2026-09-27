@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:unit": "jest --testPathPattern='src/.*.spec.ts'",
-    "test:integration": "jest --testPathPattern='test/.*.integration.ts' --runInBand",
+    "test:integration": "jest --config jest-integration.config.ts --runInBand",
     "test:e2e": "jest --config jest-e2e.config.ts --runInBand",
     "test:cov": "jest --coverage",
     "test:watch": "jest --watch"
@@ -55,6 +55,7 @@
     "@types/node": "^22.0.0",
     "@types/passport-jwt": "^4.0.1",
     "@types/passport-local": "^1.0.38",
+    "@types/supertest": "^7.2.1",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",

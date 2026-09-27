@@ -114,5 +114,4 @@
 - [ ] Token revocation via Redis blacklist (`POST /auth/logout`)
 - [ ] Organization invitation API (`POST /organizations/:id/invitations`)
 - [ ] Invitation acceptance (`POST /invitations/:token/accept`)
-- [ ] Auth integration tests (register, login, refresh, logout)
-- [ ] Cross-tenant access prevention integration test
+- [x] Auth integration tests (register, login, refresh, logout, cross-tenant isolation)

@@ -43,11 +43,10 @@ Phase 0 is fully complete. All infrastructure is running, migrations applied, se
 
 ### Phase 1 (IN PROGRESS 🚧)
 - [x] Auth module (register, login, JWT + Local strategies) — written and tested
+- [x] Auth integration tests (register, login, refresh, logout, cross-tenant isolation)
 - [ ] Refresh token rotation (currently stores in DB but rotation logic incomplete)
 - [ ] Token revocation (Redis blacklist)
 - [ ] Organization invite flow (Invitation model exists, controller TBD)
-- [ ] Auth integration tests (requires running DB)
-- [ ] Cross-tenant access prevention tests
 
 ---
 
