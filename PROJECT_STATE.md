@@ -12,14 +12,15 @@
 **Phase 2 — Documents** ✅ COMPLETE  
 **Phase 3 — Document Processing Pipeline** ✅ COMPLETE  
 **Phase 4 — Search** ✅ COMPLETE  
-**Phase 5 — AI (RAG)** 🔜 NEXT
+**Phase 5 — AI (RAG)** ✅ COMPLETE
+**Phase 6 — AI Agent** 🔜 NEXT
 
 ---
 
 ## Current Objective
 
-Phase 4 (Search) is complete. All 63 integration tests passing.
-Next: Phase 5 — AI Summaries + Q&A (RAG) with `packages/ai` provider abstraction.
+Phase 5 (AI - RAG) is complete. All 70 integration tests passing.
+Next: Phase 6 — AI Agentic Workflows.
 
 ---
 
@@ -107,8 +108,8 @@ Phase 1: Auth + Orgs         █████████████████
 Phase 2: Documents           ████████████████████  100% ✅
 Phase 3: Document Pipeline   ████████████████████  100% ✅
 Phase 4: Search              ████████████████████  100% ✅
-Phase 5: AI (RAG)            ░░░░░░░░░░░░░░░░░░░░    0% 🔜 NEXT
-Phase 6: AI Agent            ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 5: AI (RAG)            ████████████████████  100% ✅
+Phase 6: AI Agent            ░░░░░░░░░░░░░░░░░░░░    0% 🔜 NEXT
 Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░░░░    0%
 Phase 8: Observability       ░░░░░░░░░░░░░░░░░░░░    0%
 Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░░░░    0%
@@ -144,33 +145,19 @@ Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░
 
 ## In Progress / Next Session
 
-### Phase 5 — AI Summaries + Q&A (RAG)
+### Phase 6 — AI Agentic Workflows
 
-1. **`packages/ai` — Provider Abstraction**:
-   - Interface: `AIProvider` with `complete()`, `streamComplete()`, `embed()`
-   - Implementations: `OpenAIProvider`, `AnthropicProvider`
-   - Config: provider selection via `AI_PROVIDER` env var
-   - `packages/ai/src/index.ts` exports
+1. **Agent Module (`apps/api/src/agent`)**
+   - Create `AgentModule` in the API.
+   - Implement `AgentService` that uses `@docuflow/ai` (OpenAI tool calling).
 
-2. **`AIModule` in API**:
-   - `ConversationsController` — CRUD for conversations
-   - `MessagesController` — POST /conversations/:id/messages (with streaming SSE)
-   - `RAGService` — retrieval + generation:
-     - `retrieveContext()`: embed query → vector search → top-k chunks
-     - `generateAnswer()`: assemble context + prompt → LLM completion
-     - Citation tracking: source chunk IDs in response metadata
+2. **Workflows Table**
+   - Create a Prisma model for `Workflow` (id, type, status, output).
+   - Implement REST endpoints for managing workflow jobs.
 
-3. **Document Summarization**:
-   - `POST /documents/:id/summarize` — generate summary + key points
-   - Store summary in `metadata` field or new `DocumentSummary` model
-   - Streaming response via SSE
-
-4. **`ConversationsModule`**:
-   - `POST /conversations` — create conversation (optionally tied to a document)
-   - `GET /conversations` — list user's conversations
-   - `GET /conversations/:id` — conversation with messages
-   - `POST /conversations/:id/messages` — send message, get AI response (SSE stream)
-   - Store messages in `messages` table
+3. **Background Processing**
+   - Connect the worker (`apps/worker`) to consume `agent_workflows` queue.
+   - Add tool functions that the LLM can call: `searchDocuments`, `readDocument`, `updateDocumentMetadata`.
 
 ---
 
@@ -221,6 +208,13 @@ Infrastructure (local dev — ALL RUNNING ✅):
 ---
 
 ## Recent Changes
+
+- 2026-09-30: Phase 5 AI (RAG) complete.
+  - Implemented `@docuflow/ai` provider abstraction (`AIProvider`, `OpenAIProvider`).
+  - Added `AIModule` to API with `RAGService` for pgvector retrieval and context-augmented completion.
+  - Added `ConversationsModule` for REST CRUD and SSE streaming for `POST /conversations/:id/messages`.
+  - Added `AIController` for `POST /ai/documents/:id/summarize`.
+  - Tests updated, 70/70 integration tests passing.
 
 - 2026-09-30: Phase 4 Search complete.
   - Migration: `20260930150932_add_search_and_embeddings` (pgvector HNSW, tsvector, GIN indexes, trigger)
@@ -273,10 +267,11 @@ None currently.
 ## Test Status
 
 - `apps/api` unit: ✅ 6/6 passing (`src/auth/auth.service.spec.ts`)
-- `apps/api` integration: ✅ 63/63 passing (auth: 17, documents: 19, search: 21... +misc: 6)
+- `apps/api` integration: ✅ 70/70 passing (auth: 17, documents: 19, search: 21, conversations: 7... +misc: 6)
   - `test/auth.integration.ts` — 17 tests ✅
   - `test/documents.integration.ts` — 19 tests ✅
   - `test/search.integration.ts` — 21 tests ✅
+  - `test/conversations.integration.ts` — 7 tests ✅
 - `apps/worker`: No tests yet (passWithNoTests configured)
 - E2E: Not yet run
 
