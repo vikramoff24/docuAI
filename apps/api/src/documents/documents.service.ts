@@ -38,12 +38,15 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { DocumentStatus } from '@prisma/client';
 
 import { DatabaseService } from '../database/database.service';
 import { StorageService } from './storage.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
+import { DOCUMENT_PROCESSING_QUEUE } from './documents.constants';
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
@@ -76,6 +79,7 @@ export class DocumentsService {
   constructor(
     private readonly db: DatabaseService,
     private readonly storage: StorageService,
+    @InjectQueue(DOCUMENT_PROCESSING_QUEUE) private readonly documentQueue: Queue,
   ) {}
 
   // ──────────────────────────────────────────────────
@@ -207,8 +211,18 @@ export class DocumentsService {
       },
     });
 
-    // TODO Phase 3: Queue BullMQ job for text extraction and embedding
-    // await this.documentQueue.add('process', { documentId, organizationId });
+    // Queue BullMQ job for text extraction, chunking, and embedding
+    await this.documentQueue.add('process-document', {
+      documentId,
+      organizationId,
+      storageKey: updated.storageKey,
+      mimeType: updated.mimeType,
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    });
 
     this.logger.log(`Document ${documentId} confirmed and queued for processing`);
 
