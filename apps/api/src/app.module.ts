@@ -43,6 +43,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { DocumentsModule } from './documents/documents.module';
 import { FoldersModule } from './folders/folders.module';
+import { SearchModule } from './search/search.module';
 import appConfig from './config/app.config';
 import { validateConfig } from './config/config.validation';
 
@@ -136,9 +137,9 @@ import { validateConfig } from './config/config.validation';
     InvitationsModule,
     DocumentsModule,
     FoldersModule,
+    SearchModule,
 
-    // TODO Phase 3: SearchModule
-    // TODO Phase 4: AIModule, AgentModule
+    // TODO Phase 5: AIModule, AgentModule
     // TODO Phase 5: AuditModule
   ],
   controllers: [AppController],

@@ -292,7 +292,7 @@ export class DocumentProcessingService {
       // Delete any existing chunks (in case of retry/reprocessing)
       await tx.documentChunk.deleteMany({ where: { documentId } });
 
-      // Insert new chunks
+      // Insert new chunks (without embedding — Prisma doesn't support vector type)
       await tx.documentChunk.createMany({
         data: chunks.map((chunk) => ({
           documentId,
@@ -318,8 +318,62 @@ export class DocumentProcessingService {
       });
     });
 
-    this.logger.log(`✅ Stored ${chunks.length} chunks, document ${documentId} → READY`);
+    // Update embeddings via raw SQL (pgvector type not supported by Prisma createMany)
+    // We do this outside the transaction because it's a separate UPDATE pass
+    // This is safe because: if it fails, chunks still exist (status = READY)
+    // and semantic search simply won't find this document (degrades gracefully)
+    const chunksWithEmbeddings = chunks.filter((c) => c.embedding !== null);
+    if (chunksWithEmbeddings.length > 0) {
+      await this.updateEmbeddings(documentId, chunksWithEmbeddings);
+    }
+
+    this.logger.log(
+      `✅ Stored ${chunks.length} chunks (${chunksWithEmbeddings.length} with embeddings), document ${documentId} → READY`,
+    );
   }
+
+  /**
+   * Update embedding vectors via raw SQL.
+   * pgvector does not have a Prisma-native type, so we use $executeRawUnsafe.
+   *
+   * We update by (documentId, chunkIndex) since we just inserted by those keys.
+   */
+  private async updateEmbeddings(
+    documentId: string,
+    chunks: ChunkWithEmbedding[],
+  ): Promise<void> {
+    this.logger.debug(
+      `Updating ${chunks.length} embeddings for document: ${documentId}`,
+    );
+
+    // Process in batches to avoid huge query strings
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+      const batch = chunks.slice(i, i + BATCH_SIZE);
+      for (const chunk of batch) {
+        if (!chunk.embedding) continue;
+        const vectorLiteral = `[${chunk.embedding.join(',')}]`;
+        try {
+          await this.db.$executeRawUnsafe(
+            `UPDATE "document_chunks"
+             SET "embedding" = '${vectorLiteral}'::vector
+             WHERE "documentId" = '${documentId}'
+               AND "chunkIndex" = ${chunk.chunkIndex}`,
+          );
+        } catch (err) {
+          // Log but don't fail — chunk is stored, just without embedding
+          this.logger.warn(
+            `Failed to update embedding for chunk ${chunk.chunkIndex} of doc ${documentId}: ${err}`,
+          );
+        }
+      }
+    }
+
+    this.logger.debug(
+      `Updated embeddings for ${chunks.length} chunks of document: ${documentId}`,
+    );
+  }
+
 
   // ──────────────────────────────────────────────────────────────────────────
   // ERROR HANDLER: Mark document as FAILED
