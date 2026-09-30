@@ -334,34 +334,36 @@ describe('Auth Integration Tests', () => {
   // ── Logout Tests ──────────────────────────────────────────────────────────
 
   describe('POST /auth/logout', () => {
+    let logoutAccessToken: string;
     let logoutRefreshToken: string;
 
     beforeEach(async () => {
-      // Login fresh to get tokens
+      // Login fresh to get tokens — use LOCAL variables to avoid polluting
+      // the outer accessToken (which is used by subsequent test suites)
       const login = await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email: TEST_USER.email, password: TEST_USER.password })
         .expect(200);
 
       logoutRefreshToken = login.body.data.tokens.refreshToken;
-      accessToken = login.body.data.tokens.accessToken;
+      logoutAccessToken = login.body.data.tokens.accessToken;
     });
 
     it('should return 204 on logout', async () => {
       await request(app.getHttpServer())
         .post('/api/v1/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Authorization', `Bearer ${logoutAccessToken}`)
         .expect(204);
     });
 
     it('should invalidate refresh token after logout', async () => {
-      // Logout
+      // Logout — this blacklists logoutAccessToken in Redis
       await request(app.getHttpServer())
         .post('/api/v1/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Authorization', `Bearer ${logoutAccessToken}`)
         .expect(204);
 
-      // Attempt to use the refresh token — must fail
+      // Attempt to use the refresh token — must fail (refresh tokens are DB-revoked)
       await request(app.getHttpServer())
         .post('/api/v1/auth/refresh')
         .send({ refreshToken: logoutRefreshToken })
@@ -373,13 +375,16 @@ describe('Auth Integration Tests', () => {
 
   describe('Cross-tenant isolation', () => {
     it("user from Org A cannot access Org B's data via JWT claims", async () => {
-      // User 1's JWT contains organizationId = organizationId
-      // User 2's JWT contains organizationId = user2OrganizationId
-      // They should see different data from /auth/me
+      // Get fresh tokens (outer accessToken may have been used in logout tests)
+      const freshLogin1 = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email: TEST_USER.email, password: TEST_USER.password })
+        .expect(200);
+      const freshToken1 = freshLogin1.body.data.tokens.accessToken;
 
       const me1 = await request(app.getHttpServer())
         .get('/api/v1/auth/me')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Authorization', `Bearer ${freshToken1}`)
         .expect(200);
 
       const me2 = await request(app.getHttpServer())

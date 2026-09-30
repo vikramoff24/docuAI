@@ -35,9 +35,13 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
+import { RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { InvitationsModule } from './invitations/invitations.module';
+import { DocumentsModule } from './documents/documents.module';
+import { FoldersModule } from './folders/folders.module';
 import appConfig from './config/app.config';
 import { validateConfig } from './config/config.validation';
 
@@ -80,6 +84,7 @@ import { validateConfig } from './config/config.validation';
     // Infrastructure Modules (Global)
     // ──────────────────────────────────────────────────
     DatabaseModule,  // Prisma client (global)
+    RedisModule,     // Redis client (global) — used for token blacklisting, rate limit data
 
     // ──────────────────────────────────────────────────
     // Feature Modules
@@ -87,8 +92,10 @@ import { validateConfig } from './config/config.validation';
     AuthModule,
     UsersModule,
     OrganizationsModule,
+    InvitationsModule,
+    DocumentsModule,
+    FoldersModule,
 
-    // TODO Phase 2: DocumentsModule, FoldersModule
     // TODO Phase 3: SearchModule
     // TODO Phase 4: AIModule, AgentModule
     // TODO Phase 5: AuditModule

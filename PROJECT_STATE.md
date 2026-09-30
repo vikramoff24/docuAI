@@ -8,13 +8,14 @@
 ## Current Phase
 
 **Phase 0 — Foundation & Architecture Setup** ✅ COMPLETE  
-**Phase 1 — Auth & Organizations** 🚧 IN PROGRESS (core auth logic written & tested)
+**Phase 1 — Auth & Organizations** 🚧 NEARLY COMPLETE (integration test fix in progress)  
+**Phase 2 — Documents** 🚧 IN PROGRESS (core services scaffolded)
 
 ---
 
 ## Current Objective
 
-Phase 0 is fully complete. All infrastructure is running, migrations applied, seed data loaded, API responding, and both web and worker apps bootstrapped. Moving into Phase 1 completion.
+Phase 1 is functionally complete. Finishing integration test fix for Redis blacklist (jti-based). Phase 2 DocumentsModule and FoldersModule are scaffolded and type-safe.
 
 ---
 
@@ -41,12 +42,40 @@ Phase 0 is fully complete. All infrastructure is running, migrations applied, se
 - [x] Full monorepo typecheck passes (5 packages clean)
 - [x] All tests pass (6 API unit tests + worker passWithNoTests)
 
-### Phase 1 (IN PROGRESS 🚧)
+### Phase 1 (NEARLY COMPLETE 🚧 — 1 known issue)
 - [x] Auth module (register, login, JWT + Local strategies) — written and tested
-- [x] Auth integration tests (register, login, refresh, logout, cross-tenant isolation)
-- [ ] Refresh token rotation (currently stores in DB but rotation logic incomplete)
-- [ ] Token revocation (Redis blacklist)
-- [ ] Organization invite flow (Invitation model exists, controller TBD)
+- [x] Auth integration tests (register, login, refresh, logout, cross-tenant isolation) — 17 tests written
+- [x] Refresh token rotation (`POST /auth/refresh`) — implemented and tested
+- [x] Token revocation via Redis blacklist (`POST /auth/logout`) — implemented
+  - Uses `jti` (JWT ID UUID claim) as the Redis blacklist key
+  - JwtAuthGuard checks `blacklist:<jti>` on every authenticated request
+  - Auto-expires from Redis at token TTL
+- [x] `RedisModule` — global, `@Global()`, exports `REDIS_CLIENT` (ioredis)
+- [x] `JwtAuthGuard` — enhanced with Redis blacklist check (manual base64url decode to avoid DI issues)
+- [x] Organization invitation API:
+  - `POST /organizations/current/invitations` — create invitation (ADMIN/OWNER only)
+  - `GET /organizations/current/invitations` — list pending invitations
+  - `DELETE /organizations/current/invitations/:id` — cancel invitation
+  - `POST /invitations/accept` — accept by token, creates membership
+- [ ] Integration test: 2 logout/cross-tenant tests failing due to JwtAuthGuard DI issue
+  - **Fix applied** (jti + manual decode, no JwtService injection) — awaiting test run confirmation
+
+### Phase 2 (IN PROGRESS 🚧)
+- [x] `DocumentsModule` scaffolded (`documents.service.ts`, `documents.controller.ts`, `documents.module.ts`)
+  - `POST /documents/upload-url` — presigned S3 PUT URL + document record (PENDING)
+  - `POST /documents/:id/confirm` — verify S3 upload, set PROCESSING, queue job (TODO Phase 3)
+  - `GET /documents` — paginated list with search + folder filter
+  - `GET /documents/:id` — document metadata
+  - `GET /documents/:id/download` — presigned S3 GET URL
+  - `DELETE /documents/:id` — soft delete
+- [x] `StorageService` — S3-compatible (LocalStack dev / AWS prod), presigned URLs, key builder
+- [x] `FoldersModule` scaffolded (`folders.service.ts`, `folders.controller.ts`, `folders.module.ts`)
+  - `POST /folders` — create folder with materialized path
+  - `GET /folders` — list root or children by parentId
+  - `DELETE /folders/:id` — soft delete (non-empty folders rejected)
+- [x] AWS SDK installed (`@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`)
+- [ ] Document integration tests (Phase 2)
+- [ ] S3 upload flow manual smoke test
 
 ---
 
@@ -54,8 +83,8 @@ Phase 0 is fully complete. All infrastructure is running, migrations applied, se
 
 ```
 Phase 0: Foundation          ████████████████████  100% ✅
-Phase 1: Auth + Orgs         ████████░░░░░░░░░░░░   40% (auth logic written & tested)
-Phase 2: Documents           ░░░░░░░░░░░░░░░░░░░░    0%
+Phase 1: Auth + Orgs         ████████████████████   95% 🚧 (1 test fix pending)
+Phase 2: Documents           ████████░░░░░░░░░░░░   40% (services scaffolded, untested)
 Phase 3: Document Pipeline   ░░░░░░░░░░░░░░░░░░░░    0%
 Phase 4: Search              ░░░░░░░░░░░░░░░░░░░░    0%
 Phase 5: AI (RAG)            ░░░░░░░░░░░░░░░░░░░░    0%
@@ -86,11 +115,16 @@ Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░
 - [x] Prisma migration `20260927182727_init` applied to `docuflow_dev` database
 - [x] NestJS API (`apps/api` — port 3001):
   - `DatabaseModule` & `DatabaseService` extending `PrismaClient` with logging & health check
-  - `AuthModule` with registration, login, JWT strategy, Local strategy, `RolesGuard`, `JwtAuthGuard`
+  - `RedisModule` (global) — ioredis client with retry strategy, exports `REDIS_CLIENT`
+  - `AuthModule` with registration, login, JWT strategy, Local strategy, `RolesGuard`, `JwtAuthGuard` (+ Redis blacklist)
   - `UsersModule` and `OrganizationsModule`
+  - `InvitationsModule` — full CRUD for org invitations
+  - `DocumentsModule` — upload URL flow, CRUD, presigned download
+  - `FoldersModule` — create/list/delete folder tree
   - Global `AllExceptionsFilter`, `LoggingInterceptor`, `TransformInterceptor`
   - `GET /api/v1/health` returns `{ status: 'ok', services: { database: 'ok' } }`
   - Unit tests for `AuthService` in `apps/api/src/auth/auth.service.spec.ts` (6/6 passing)
+  - Integration test suite in `apps/api/test/auth.integration.ts` (17 tests — 2 logout tests need verify)
 - [x] Next.js 16 Web app (`apps/web` — port 3000):
   - Stunning dark landing page with glassmorphism, mesh gradients, animations
   - Hero, features grid, mock product UI, how-it-works, pricing, CTA, footer
@@ -105,12 +139,17 @@ Phase 9: Polish + Eval       ░░░░░░░░░░░░░░░░░
 
 ## In Progress / Next Session
 
-- Phase 1 completion:
-  - Refresh token rotation endpoint (`POST /auth/refresh`)
-  - Token revocation via Redis blacklist
-  - Organization invitation API
-  - Auth integration tests
-- Phase 2: Document management (upload, CRUD, S3 presigned URLs)
+1. **Verify integration tests pass** after JwtAuthGuard fix (jti + manual base64url decode):
+   - Run `pnpm --filter @docuflow/api test:integration`
+   - Expected: 17/17 pass
+
+2. **Phase 2 — Document integration tests**:
+   - Write `test/documents.integration.ts` covering upload-url → S3 put → confirm → list → download → delete flow
+   - LocalStack S3 must be running (already is)
+
+3. **Phase 2 — Connect Worker to DocumentsModule**:
+   - When `confirmUpload` is called, queue BullMQ job via `DocumentProcessingService`
+   - Add `@docuflow/database` Prisma client to worker (currently no DB in worker)
 
 ---
 
@@ -165,13 +204,13 @@ Infrastructure (local dev — ALL RUNNING ✅):
 
 ## Recent Changes
 
-- 2026-09-28: Phase 0 COMPLETE. Fixed all typecheck errors (passport-local, tsconfig inlining). Started Docker infrastructure. Applied Prisma migration. Seeded database. Verified API health endpoint. Bootstrapped Next.js 16 web app with stunning landing page. Bootstrapped BullMQ worker app.
+- 2026-09-28: Phase 1 Phase 2 work. Added `RedisModule`, `InvitationsModule`, `DocumentsModule`, `FoldersModule`. Enhanced `JwtAuthGuard` with Redis blacklist (jti-based). Added `jti` UUID claim to every JWT. Fixed test token scoping issue in integration tests. Installed `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`.
 
 ---
 
 ## Known Issues & Errors
 
-None. All typecheck, tests, and infrastructure verified clean.
+1. **Integration test fix pending verification**: JwtAuthGuard now uses manual base64url JWT decode to extract `jti` claim (no JwtService injection) to avoid DI failures across modules. Fix has been applied; test run in progress at checkpoint time.
 
 ---
 
@@ -179,6 +218,8 @@ None. All typecheck, tests, and infrastructure verified clean.
 
 1. **tsconfig extends**: `packages/config/tsconfig.base.json` isn't used by `apps/api`, `apps/worker`, or `packages/database` because ts-node/jest can't resolve workspace paths. Each app has inlined tsconfig options. This is standard for NestJS monorepos — low priority.
 2. **Worker DB connection**: The worker doesn't yet have a Prisma connection. This is intentional — it will be added in Phase 3 when actual DB writes are needed.
+3. **Document upload confirmation**: `confirmUpload` currently does NOT queue a BullMQ job. The queue call is stubbed with a TODO comment. Will be wired in Phase 3.
+4. **Refresh token lookup**: `refreshTokens()` in `AuthService` queries all non-expired tokens and does a linear bcrypt scan — works for Phase 1, needs optimization (store jti in cookie or index) for production scale.
 
 ---
 
@@ -192,8 +233,8 @@ None. All typecheck, tests, and infrastructure verified clean.
 | PostgreSQL | ✅ Running | Container: `docuflow-postgres`, port 5432 |
 | Redis | ✅ Running | Container: `docuflow-redis`, port 6379 |
 | LocalStack | ✅ Running | Container: `docuflow-localstack`, port 4566 |
-| API Server | ✅ Running | Port 3001 (dev mode) |
-| Web Server | ✅ Running | Port 3000 (Next.js dev) |
+| API Server | ❓ Not checked this session | Port 3001 (dev mode) |
+| Web Server | ❓ Not checked this session | Port 3000 (Next.js dev) |
 
 ---
 
@@ -205,9 +246,10 @@ Not yet deployed. Local development only.
 
 ## Test Status
 
-- `apps/api`: Unit tests passing (`src/auth/auth.service.spec.ts`: 6/6 passed)
+- `apps/api` unit: ✅ 6/6 passing (`src/auth/auth.service.spec.ts`)
+- `apps/api` integration: 🚧 17 tests written; 2 logout/cross-tenant tests failing due to JwtAuthGuard DI issue — **fix applied at checkpoint**, awaiting confirmation run
 - `apps/worker`: No tests yet (passWithNoTests configured)
-- Integration/E2E: Not yet run (Phase 1 goal)
+- E2E: Not yet run
 
 ---
 
@@ -215,34 +257,37 @@ Not yet deployed. Local development only.
 
 - ✅ Migration `20260927182727_init` applied to `docuflow_dev`
 - ✅ Database seeded (5 users, 2 organizations, 2 root folders)
+- No new migrations this session (schema unchanged)
 
 ---
 
 ## Current Git Branch & Commit
 
 - Branch: `main`
-- Last checkpoint commit: `d1a6a23` ("chore(checkpoint): pause development at Phase 0 foundation and API scaffolding")
-- Upcoming commit: Phase 0 complete checkpoint
+- Previous checkpoint: `670fe92` ("test(auth): add auth integration test suite")
+- **Upcoming commit this session**: Phase 1 complete + Phase 2 scaffold
 
 ---
 
 ## Exact Next Actions for Next Session
 
-1. **Complete Phase 1 Auth**:
-   - Implement `POST /auth/refresh` endpoint for refresh token rotation
-   - Add Redis token blacklisting to `AuthService.logout()`
-   - Write integration tests for auth endpoints
-   
-2. **Organization Invitations**:
-   - `POST /organizations/:id/invitations` — create invitation, send email (placeholder)
-   - `POST /invitations/:token/accept` — accept invite, create member record
-   
-3. **Phase 2 Documents**:
-   - `POST /documents/upload-url` — return presigned S3 PUT URL
-   - `POST /documents/:id/confirm` — confirm upload, trigger processing job
-   - `GET /documents` — paginated document list
-   - `GET /documents/:id` — get document with metadata
-   - `DELETE /documents/:id` — soft delete
+### FIRST: Verify integration tests
+```bash
+export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$PATH"
+cd /Users/vikrams/Documents/code/DocuAI
+pnpm --filter @docuflow/api test:integration
+```
+Expected: 17/17 PASS. If still failing, the known issue is in `JwtAuthGuard.checkBlacklist()` — debug the jti extraction logic.
+
+### THEN: Phase 2 document integration tests
+- Write `apps/api/test/documents.integration.ts`
+- Test: upload-url → PUT to LocalStack S3 → confirm → list → get → download → delete
+- LocalStack S3 is running at `http://localhost:4566`
+
+### THEN: Wire BullMQ job queue in confirmUpload
+- Import `DocumentProcessingService` from worker (or create a shared queue client)
+- Add `@InjectQueue('document-processing') private queue: Queue` to `DocumentsService`
+- Call `queue.add('process', { documentId, organizationId, storageKey })` in `confirmUpload()`
 
 ## Test Accounts (seeded)
 

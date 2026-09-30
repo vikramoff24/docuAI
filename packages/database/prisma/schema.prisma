@@ -256,7 +256,7 @@ model Document {
   name            String
   description     String?
   mimeType        String
-  sizeBytes       BigInt
+  sizeBytes       Int            // File size in bytes (max ~2GB with Int; we cap at 100MB)
   storageKey      String         // S3 object key: "organizations/{orgId}/documents/{docId}/{filename}"
   status          DocumentStatus @default(PENDING)
   processingError String?        // Error message if status = FAILED

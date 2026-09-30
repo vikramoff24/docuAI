@@ -35,6 +35,7 @@ import { OrganizationMemberRole } from '@prisma/client';
 
 import { AuthService } from './auth.service';
 import { DatabaseService } from '../database/database.service';
+import { REDIS_CLIENT } from '../redis/redis.module';
 
 // ────────────────────────────────────────────────
 // Test fixtures
@@ -102,6 +103,11 @@ const mockConfigService = {
   }),
 };
 
+const mockRedis = {
+  get: jest.fn().mockResolvedValue(null),
+  setex: jest.fn().mockResolvedValue('OK'),
+};
+
 // ────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────
@@ -117,6 +123,7 @@ describe('AuthService', () => {
         { provide: DatabaseService, useValue: mockDb },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: REDIS_CLIENT, useValue: mockRedis },
       ],
     }).compile();
 
@@ -231,12 +238,15 @@ describe('AuthService', () => {
         OrganizationMemberRole.ADMIN,
       );
 
-      expect(mockJwtService.sign).toHaveBeenCalledWith({
-        sub: 'user-id',
-        email: 'alice@acme.com',
-        organizationId: 'org-id',
-        role: OrganizationMemberRole.ADMIN,
-      });
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'user-id',
+          email: 'alice@acme.com',
+          organizationId: 'org-id',
+          role: OrganizationMemberRole.ADMIN,
+          jti: expect.any(String), // UUID, unique per token
+        }),
+      );
     });
   });
 });

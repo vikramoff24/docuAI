@@ -98,8 +98,14 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Logout and revoke refresh tokens' })
-  async logout(@CurrentUser() user: RequestUser) {
-    await this.authService.logout(user.userId);
+  async logout(
+    @CurrentUser() user: RequestUser,
+    @Req() req: FastifyRequest,
+  ) {
+    // Extract the raw token so it can be blacklisted in Redis
+    const authHeader = req.headers.authorization ?? '';
+    const accessToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+    await this.authService.logout(user.userId, accessToken);
   }
 
   // ──────────────────────────────────────────────────

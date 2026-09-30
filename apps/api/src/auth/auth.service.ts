@@ -46,22 +46,26 @@ import {
   ConflictException,
   Logger,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import { OrganizationMemberRole } from '@prisma/client';
+import Redis from 'ioredis';
 
 import { DatabaseService } from '../database/database.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { REDIS_CLIENT } from '../redis/redis.module';
 
 export interface JwtPayload {
   sub: string;           // user ID
   email: string;
   organizationId: string;
   role: OrganizationMemberRole;
+  jti: string;           // JWT ID — unique per token, used for blacklisting
 }
 
 export interface AuthTokens {
@@ -78,6 +82,7 @@ export class AuthService {
     private readonly db: DatabaseService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ──────────────────────────────────────────────────
@@ -242,7 +247,12 @@ export class AuthService {
     ipAddress?: string,
     userAgent?: string,
   ): Promise<AuthTokens> {
-    const payload: JwtPayload = { sub: userId, email, organizationId, role };
+    // jti = JWT ID: a unique identifier per token
+    // WHY? Without jti, two tokens issued for the same user within the same second
+    // are identical (same iat, same payload) → same signature → same string.
+    // Adding jti ensures every token is unique, which is required for blacklisting.
+    const jti = uuidv4();
+    const payload: JwtPayload = { sub: userId, email, organizationId, role, jti };
 
     // Sign access token (short-lived, stateless)
     const accessToken = this.jwtService.sign(payload);
@@ -341,14 +351,51 @@ export class AuthService {
   // LOGOUT
   // ──────────────────────────────────────────────────
 
-  async logout(userId: string) {
-    // Revoke all refresh tokens for this user
+  async logout(userId: string, accessToken?: string) {
+    // 1. Revoke all refresh tokens for this user in the DB
     await this.db.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
 
+    // 2. Blacklist the current access token in Redis
+    // WHY? Access tokens are stateless JWTs — they remain valid until expiry
+    // even after the user logs out. We store the token's jti (JWT ID) in Redis
+    // with a TTL matching the token expiry.
+    // WHY jti and not full token? Shorter key, semantically cleaner, same security.
+    if (accessToken) {
+      try {
+        const decoded = this.jwtService.decode(accessToken) as { exp?: number; jti?: string } | null;
+        if (decoded?.jti && decoded?.exp) {
+          const now = Math.floor(Date.now() / 1000);
+          const ttl = decoded.exp - now;
+          if (ttl > 0) {
+            // Key: blacklist:<jti> → Value: '1' → TTL: remaining seconds
+            await this.redis.setex(`blacklist:${decoded.jti}`, ttl, '1');
+          }
+        }
+      } catch {
+        // Don't fail logout if Redis blacklisting fails
+        this.logger.warn(`Failed to blacklist token for user ${userId}`);
+      }
+    }
+
     this.logger.log(`User logged out: ${userId}`);
+  }
+
+  /**
+   * Check if an access token has been blacklisted (used by JwtAuthGuard)
+   * Extracts the jti from the token and checks Redis.
+   */
+  async isTokenBlacklisted(accessToken: string): Promise<boolean> {
+    try {
+      const decoded = this.jwtService.decode(accessToken) as { jti?: string } | null;
+      if (!decoded?.jti) return false;
+      const result = await this.redis.get(`blacklist:${decoded.jti}`);
+      return result !== null;
+    } catch {
+      return false;
+    }
   }
 
   // ──────────────────────────────────────────────────
