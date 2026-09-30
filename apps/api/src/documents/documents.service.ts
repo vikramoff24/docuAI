@@ -215,8 +215,9 @@ export class DocumentsService {
     await this.documentQueue.add('process-document', {
       documentId,
       organizationId,
-      storageKey: updated.storageKey,
+      s3Key: updated.storageKey,                          // Consumer expects s3Key
       mimeType: updated.mimeType,
+      fileName: updated.storageKey.split('/').pop() ?? updated.name, // Extract filename from S3 key
     }, {
       attempts: 3,
       backoff: { type: 'exponential', delay: 2000 },

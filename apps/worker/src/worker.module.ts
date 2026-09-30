@@ -9,6 +9,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bull';
 
+import { WorkerDatabaseModule } from './database/worker-database.module';
 import { DocumentProcessingModule } from './document-processing/document-processing.module';
 
 @Module({
@@ -59,6 +60,7 @@ import { DocumentProcessingModule } from './document-processing/document-process
     }),
 
     // ── Feature Modules ──────────────────────────────────────
+    WorkerDatabaseModule,       // Prisma client for DB writes (global)
     DocumentProcessingModule,
   ],
 })
