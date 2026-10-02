@@ -233,3 +233,56 @@ test.describe("settings: OpenAI API key", () => {
     await expect(page.getByText("Not configured.")).toBeVisible();
   });
 });
+
+test.describe("rate limiting", () => {
+  // Own client IP for this file's requests: the API trusts the local Next.js proxy's
+  // X-Forwarded-For, so this test gets its own rate-limit bucket (no effect on others).
+  test.use({
+    extraHTTPHeaders: { "X-Forwarded-For": `198.18.${Math.floor(Math.random() * 255)}.${1 + Math.floor(Math.random() * 253)}` },
+  });
+
+  test("the login form explains when sign-in attempts are rate limited", async ({ page }) => {
+    const attempt = () =>
+      page.request.post("/api/v1/auth/login", {
+        data: { email: "nobody@rate-limit.test", password: "WrongPass123!" },
+      });
+
+    // Exhaust the login budget (its size depends on RATE_LIMIT_MULTIPLIER, so read it).
+    const first = await attempt();
+    expect(first.status()).toBe(401);
+    const limit = Number(first.headers()["x-ratelimit-limit-sustained"]);
+    expect(limit).toBeGreaterThan(0);
+    for (let i = 1; i < limit; i++) expect((await attempt()).status()).toBe(401);
+
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(uniqueEmail("limited"));
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page.getByText(/too many requests\. please wait \d+ (seconds|minutes)/i)).toBeVisible();
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("a rate-limited token refresh keeps the user signed in", async ({ page }) => {
+    await signUp(page, uniqueEmail("refresh-429"));
+    const s = await readSession(page);
+    await page.evaluate(
+      ([key, sess]) => localStorage.setItem(key, JSON.stringify({ ...sess, accessToken: "expired.token.value" })),
+      [STORAGE_KEY, s] as const
+    );
+    await page.route("**/api/v1/auth/refresh", (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        body: JSON.stringify({ statusCode: 429, message: "Too many requests. Please wait 30 seconds and try again." }),
+      })
+    );
+    await page.reload();
+    await expect(page).toHaveURL(/\/dashboard$/);
+    expect((await readSession(page))?.refreshToken).toBe(s.refreshToken);
+
+    // Once refresh works again, the session recovers without signing in.
+    await page.unroute("**/api/v1/auth/refresh");
+    await page.reload();
+    await expect(page.getByText("No documents yet")).toBeVisible();
+  });
+});

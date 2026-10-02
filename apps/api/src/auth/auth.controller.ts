@@ -34,6 +34,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequestUser } from './strategies/jwt.strategy';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -44,6 +45,7 @@ export class AuthController {
   // POST /auth/register
   // ──────────────────────────────────────────────────
 
+  @RateLimit('register')
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new user and create an organization' })
@@ -58,6 +60,7 @@ export class AuthController {
   // POST /auth/login
   // ──────────────────────────────────────────────────
 
+  @RateLimit('login')
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login with email and password' })
@@ -67,7 +70,8 @@ export class AuthController {
     @Body() dto: LoginDto,
     @Req() req: FastifyRequest,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] ?? req.ip;
+    // req.ip honours TRUST_PROXY (main.ts); a raw X-Forwarded-For is client-controlled
+    const ipAddress = req.ip;
     const userAgent = req.headers['user-agent'];
 
     return this.authService.login(dto, ipAddress, userAgent);
@@ -77,6 +81,7 @@ export class AuthController {
   // POST /auth/refresh
   // ──────────────────────────────────────────────────
 
+  @RateLimit('refresh')
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
@@ -84,7 +89,8 @@ export class AuthController {
     @Body() body: RefreshTokenDto,
     @Req() req: FastifyRequest,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] ?? req.ip;
+    // req.ip honours TRUST_PROXY (main.ts); a raw X-Forwarded-For is client-controlled
+    const ipAddress = req.ip;
     const userAgent = req.headers['user-agent'];
 
     return this.authService.refreshTokens(body.refreshToken, ipAddress, userAgent, body.organizationId);

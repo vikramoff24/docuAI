@@ -25,6 +25,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
 import { RAGService } from './rag.service';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @UseGuards(JwtAuthGuard)
 @Controller('ai')
@@ -46,6 +47,7 @@ export class AIController {
    *   wordCount: number,    // Approximate word count of the document
    * }
    */
+  @RateLimit('aiSummarize')
   @Post('documents/:id/summarize')
   @HttpCode(HttpStatus.OK)
   async summarizeDocument(

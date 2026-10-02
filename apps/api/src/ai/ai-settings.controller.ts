@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @ApiTags('settings')
 @ApiBearerAuth('access-token')
@@ -33,6 +34,7 @@ export class AiSettingsController {
     return this.credentials.getStatus(user.organizationId);
   }
 
+  @RateLimit('aiKeyVerify')
   @Put('openai-key')
   @Roles(OrganizationMemberRole.ADMIN)
   @ApiOperation({ summary: 'Verify and store the organization OpenAI API key' })

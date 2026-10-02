@@ -52,6 +52,16 @@ const configSchema = z.object({
 
   // Bcrypt
   BCRYPT_SALT_ROUNDS: z.coerce.number().default(10),
+
+  // Rate limiting: every limit is multiplied by this. 1 = production limits,
+  // larger relaxes them (E2E suites, many requests from one IP), 0 disables.
+  RATE_LIMIT_MULTIPLIER: z.coerce.number().min(0).default(1),
+
+  // Which proxies may set X-Forwarded-For (client IP for rate limits and audit).
+  // 'loopback' trusts only a proxy on the same host (the Next.js rewrite proxy in dev).
+  // Behind a load balancer: its hop count (e.g. '1') or its addresses/CIDRs, comma-separated.
+  // 'true' trusts any sender — then anyone can spoof their IP and dodge rate limits.
+  TRUST_PROXY: z.string().default('loopback'),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

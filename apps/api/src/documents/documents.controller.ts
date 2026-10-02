@@ -42,6 +42,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @ApiTags('documents')
 @ApiBearerAuth('access-token')
@@ -128,6 +129,7 @@ export class DocumentsController {
     return this.documentsService.getIndexStatus(user.organizationId);
   }
 
+  @RateLimit('reindex')
   @Post('reindex')
   @HttpCode(HttpStatus.ACCEPTED)
   @Roles(OrganizationMemberRole.ADMIN)

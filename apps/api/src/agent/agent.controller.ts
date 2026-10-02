@@ -29,6 +29,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @ApiTags('workflows')
 @ApiBearerAuth('access-token')
@@ -37,6 +38,7 @@ import { RequestUser } from '../auth/strategies/jwt.strategy';
 export class AgentController {
   constructor(private readonly agentService: AgentService) {}
 
+  @RateLimit('aiWorkflow')
   @Post()
   @HttpCode(HttpStatus.CREATED)
   // Workflows can modify document metadata, so viewers may not start them.

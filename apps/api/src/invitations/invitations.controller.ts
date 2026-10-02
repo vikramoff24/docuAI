@@ -40,6 +40,7 @@ import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @ApiTags('invitations')
 @Controller()
@@ -112,6 +113,7 @@ export class InvitationsController {
   // Public endpoint — no JWT required (user may not have a token yet)
   // ──────────────────────────────────────────────────
 
+  @RateLimit('invitationPreview')
   @Get('invitations/preview')
   @ApiOperation({ summary: 'Public: who invited whom to which organization (for the invite landing page)' })
   @ApiResponse({ status: 404, description: 'Unknown token' })
@@ -119,6 +121,7 @@ export class InvitationsController {
     return this.invitationsService.previewInvitation(token);
   }
 
+  @RateLimit('invitationAccept')
   @Post('invitations/accept')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)  // Accepting requires the user to be logged in

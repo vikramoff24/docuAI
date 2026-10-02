@@ -22,6 +22,7 @@ const config: Config = {
   collectCoverageFrom: ['src/**/*.(t|j)s', '!**/node_modules/**', '!**/dist/**'],
   coverageDirectory: './coverage',
   testEnvironment: 'node',
+  setupFiles: ['<rootDir>/test/setup-env.ts'],
   testTimeout: 30000,     // 30s timeout for DB operations
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',

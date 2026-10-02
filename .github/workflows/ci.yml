@@ -143,6 +143,10 @@ jobs:
             --cors-configuration '{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE","HEAD"],"AllowedOrigins":["http://localhost:3000"],"ExposeHeaders":["ETag"]}]}'
       - run: pnpm db:migrate
       - name: Start API, worker and web
+        env:
+          # Every journey comes from one IP; relax limits instead of disabling them,
+          # so the rate-limit journey still runs against the real guard.
+          RATE_LIMIT_MULTIPLIER: '20'
         run: |
           (cd apps/api && PORT=3001 node dist/main > ../../api.log 2>&1 &)
           (cd apps/worker && WORKER_PORT=3002 node dist/main > ../../worker.log 2>&1 &)

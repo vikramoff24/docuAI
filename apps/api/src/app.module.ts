@@ -29,6 +29,7 @@
  */
 
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bull';
@@ -36,7 +37,8 @@ import { BullModule } from '@nestjs/bull';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
-import { RedisModule } from './redis/redis.module';
+import Redis from 'ioredis';
+import { REDIS_CLIENT, RedisModule } from './redis/redis.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { OrganizationsModule } from './organizations/organizations.module';
@@ -47,6 +49,9 @@ import { SearchModule } from './search/search.module';
 import { AIModule } from './ai/ai.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { AgentModule } from './agent/agent.module';
+import { AppThrottlerGuard } from './common/rate-limit/app-throttler.guard';
+import { RedisThrottlerStorage } from './common/rate-limit/redis-throttler.storage';
+import { GLOBAL_THROTTLERS } from './common/rate-limit/rate-limit';
 import appConfig from './config/app.config';
 import { validateConfig } from './config/config.validation';
 
@@ -69,21 +74,17 @@ import { validateConfig } from './config/config.validation';
 
     // ──────────────────────────────────────────────────
     // Throttler (Rate Limiting) — Global
-    // Backed by Redis (see throttler config in auth module)
-    // Default: 100 requests per minute per IP
+    // Counters live in Redis so limits hold across API instances.
+    // Global limits + stricter per-route ones: common/rate-limit/rate-limit.ts
+    // Enforced by AppThrottlerGuard (APP_GUARD below), scaled by RATE_LIMIT_MULTIPLIER.
     // ──────────────────────────────────────────────────
-    ThrottlerModule.forRoot([
-      {
-        name: 'short',
-        ttl: 1000,   // 1 second
-        limit: 20,   // 20 req/sec burst
-      },
-      {
-        name: 'medium',
-        ttl: 60000,  // 1 minute
-        limit: 300,  // 300 req/min sustained
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis) => ({
+        throttlers: GLOBAL_THROTTLERS,
+        storage: new RedisThrottlerStorage(redis),
+      }),
+    }),
 
     // ──────────────────────────────────────────────────
     // Infrastructure Modules (Global)
@@ -148,6 +149,6 @@ import { validateConfig } from './config/config.validation';
     // TODO Phase 5: AuditModule
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, { provide: APP_GUARD, useClass: AppThrottlerGuard }],
 })
 export class AppModule {}

@@ -31,6 +31,14 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
+/** TRUST_PROXY → Fastify trustProxy: boolean, hop count, or addresses/CIDRs/names. */
+function parseTrustProxy(value = 'loopback'): boolean | number | string {
+  const v = value.trim();
+  if (v === 'true' || v === 'false') return v === 'true';
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
+}
+
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
@@ -41,7 +49,7 @@ async function bootstrap() {
     AppModule,
     new FastifyAdapter({
       logger: false, // We use our own logger (pino via NestJS logger)
-      trustProxy: true, // Required if behind a load balancer (to get real IP)
+      trustProxy: parseTrustProxy(process.env.TRUST_PROXY), // see config.validation.ts
     }),
     {
       bufferLogs: true, // Buffer logs until our custom logger is attached

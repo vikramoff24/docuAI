@@ -31,6 +31,14 @@ Org switching, live membership checks, invitation links + landing/sign-up flow, 
 folders UI (navigate, create, delete, move), retry + reindex. Design: `docs/adr/ADR-012-teams-and-org-switching.md`.
 Tests: `apps/api/test/team.integration.ts`, `apps/web/e2e/team.spec.ts`, reindex journey in `e2e/ai-live.spec.ts`.
 
+## Rate limiting (2026-10-02) ✅
+Global + per-route limits per client IP, Redis-backed; `TRUST_PROXY` fixes IP spoofing. Design: `docs/adr/ADR-013-rate-limiting.md`.
+Tests: `apps/api/test/rate-limit.integration.ts`, "rate limiting" journeys in `apps/web/e2e/journey.spec.ts`.
+
+## Next
+1. Push to a GitHub remote (user to create the repo) and get CI green.
+2. Phase 6 extras below, or Phase 7 observability.
+
 ## Deferred to a later Phase 6 increment
 - Remaining roadmap tools (`listFolders`, `createFolder`, `moveDocument`, `summarizeDocument`, `shareDocument`, `getAuditLogs`). These need a human-approval step for destructive or sharing actions.
 - Streaming progress (SSE) instead of polling.
@@ -44,6 +52,7 @@ pnpm --filter @docuflow/web lint
 pnpm --filter @docuflow/api test:unit
 pnpm --filter @docuflow/api test:integration     # needs docker compose up
 pnpm db:check-migrations
-cd apps/web && E2E_BASE_URL=http://localhost:3000 pnpm test:e2e   # needs pnpm dev running (journey + edge-cases)
+RATE_LIMIT_MULTIPLIER=20 pnpm dev                # E2E comes from one IP; relax limits (CI does the same)
+cd apps/web && E2E_BASE_URL=http://localhost:3000 pnpm test:e2e   # needs pnpm dev running
 cd apps/web && E2E_OPENAI_KEY=sk-... E2E_BASE_URL=http://localhost:3000 pnpm test:e2e ai-live   # opt-in, real OpenAI
 ```

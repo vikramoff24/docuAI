@@ -49,6 +49,7 @@ import { RequestUser } from '../auth/strategies/jwt.strategy';
 import { ConversationsService } from './conversations.service';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { RateLimit } from '../common/rate-limit/rate-limit';
 
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
@@ -137,6 +138,7 @@ export class ConversationsController {
    * Errors during streaming are sent as:
    *   data: {"type":"error","error":"..."}
    */
+  @RateLimit('aiChat')
   @Post(':id/messages')
   async sendMessage(
     @CurrentUser() user: RequestUser,

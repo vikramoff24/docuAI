@@ -19,9 +19,9 @@
 
 ## Current Objective
 
-Phase 6 core is complete end-to-end (DB → API → worker → UI → unit/integration/E2E → CI config → docs).
-Next: commit the Phase 6 checkpoint and push to a GitHub remote so CI runs. Then choose between the Phase 6 extras
-(approval-gated tools) and Phase 7 (observability). See `tasks/current-phase.md`.
+Phase 6 core is committed (`17b0d75`) and rate limiting is in place (ADR-013).
+Next: push to a GitHub remote so CI runs (needs the user to create/choose the repo). Then choose between the
+Phase 6 extras (approval-gated tools) and Phase 7 (observability). See `tasks/current-phase.md`.
 
 **Development mode (from 2026-10-01):** features ship end-to-end. Frontend, backend, tests and docs move together,
 and a feature is only DONE after browser verification (Playwright journeys) and a security check.
@@ -162,15 +162,16 @@ Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░
 
 ## In Progress / Next Session
 
-1. Commit the Phase 6 work plus the teams/folders increment (all uncommitted in the working tree).
-2. Add a GitHub remote and push, then confirm `.github/workflows/ci.yml` goes green. It has never run on GitHub.
-3. Enable rate limiting (see Known Issues), then: Phase 6 extras with human approval for destructive tools, **or** Phase 7 observability.
+1. ~~Commit the Phase 6 work~~ ✅ `17b0d75` (2026-10-02).
+2. **Blocked on the user:** add a GitHub remote and push, then confirm `.github/workflows/ci.yml` goes green.
+   It has never run on GitHub. Creating the repo is outward-facing, so it was left for the user.
+3. ~~Enable rate limiting~~ ✅ 2026-10-02 (ADR-013).
+4. Next feature: Phase 6 extras with human approval for destructive tools, **or** Phase 7 observability.
+   Smaller open items below (folder rename/move, mobile layout) are good warm-ups.
 
 ### To fix later (from the 2026-10-01 teams/folders review)
 
-- [ ] **Rate limiting is off everywhere, including login.** `ThrottlerModule` is configured in `apps/api/src/app.module.ts`,
-  but no `ThrottlerGuard` is registered. Add it (e.g. as `APP_GUARD`) with strict per-route limits on login, signup, refresh
-  and `GET /invitations/preview`. Give the test suites their own limits so integration/E2E runs (many requests from one IP) don't get 429s.
+- [x] ~~Rate limiting is off everywhere~~: done 2026-10-02 (ADR-013).
 - [ ] **Folders:** add renaming folders and moving whole folders. Only documents can be moved today.
 - [ ] **Mobile dashboard layout:** at phone widths the sidebar squeezes the content on every tab.
 - [ ] **Invitations by email:** add email delivery and email verification. Then invites can be sent instead of
@@ -228,10 +229,24 @@ Infrastructure (local dev — ALL RUNNING ✅):
 | Agent workflows | Async queue + bounded tool loop | ADR-010 |
 | Org AI keys | Encrypted per-org keys set in UI, env fallback | ADR-011 |
 | Teams | Org on refresh token; live membership check; invite links | ADR-012 |
+| Rate limiting | Global + per-route per-IP limits in Redis; `TRUST_PROXY` | ADR-013 |
 
 ---
 
 ## Recent Changes
+
+- 2026-10-02: **Rate limiting (end-to-end)**. See ADR-013.
+  - Committed the Phase 6 + teams checkpoint as `17b0d75` after re-running typecheck, lint, unit and integration.
+  - Global `AppThrottlerGuard` (20 req/s, 300 req/min per IP) with Redis-backed counters (Lua, fails open), plus
+    stricter per-route limits on login, register, refresh, invitation preview/accept, AI chat/summarize/workflow,
+    AI key verification and reindex. 429 carries `Retry-After` and a readable message the UI shows as is.
+  - **Security fix:** the API trusted `X-Forwarded-For` from anyone (`trustProxy: true`) and the auth controller read the
+    header directly for audit IPs, so clients could forge their IP. Now `TRUST_PROXY` (default `loopback`) and `req.ip` only.
+  - `RATE_LIMIT_MULTIPLIER` scales all limits: integration suites default to 0 (`test/setup-env.ts`), CI E2E uses 20.
+  - **Dev bug:** `infra/localstack/init-s3.sh` wasn't executable ("Permission denied" in LocalStack's ready hook), so the
+    bucket only existed because it had been created by hand, and vanished on every Docker restart. Mode fixed (+x in git).
+  - Tests: `test/rate-limit.integration.ts` (6, real limits, per-test forwarded IPs, spoofing check), 2 Playwright
+    journeys (real 429 on the login form; a throttled refresh doesn't sign the user out).
 
 - 2026-10-01: **Teams, organization switching, folders UI, reindexing (end-to-end)**. See ADR-012.
   - **Org switching:** the session's org is stored on the refresh token (migration `20261001173531`, generated with
@@ -364,8 +379,9 @@ Infrastructure (local dev — ALL RUNNING ✅):
 - `pnpm --filter @docuflow/api lint:check` fails: ESLint 9 finds no flat config for the API (pre-existing; CI lints web only).
 - If a tab closes in the middle of a token refresh, the server has already rotated the token and the session is lost.
   A short reuse grace window for refresh tokens would cover this.
-- **No rate limiting is active.** `ThrottlerModule` is configured but no `ThrottlerGuard` is registered (login, signup
-  and invitation preview are unthrottled). Enabling it needs per-route limits that the E2E/integration suites tolerate.
+- **Deploying: set `TRUST_PROXY`** to the load balancer's hop count or CIDRs (default `loopback`). Otherwise all users
+  share the proxy's IP and its rate limits, or (with `true`) anyone can spoof their IP. See ADR-013.
+- Rate limits are per IP (users behind one NAT share them); there is no per-account login limit (lock-out risk).
 - Invitations are shared as links (no email delivery or email verification yet). See ADR-012.
 - Folder rename and moving folders aren't supported (documents can be moved).
 - Folder-name uniqueness is checked in code only (no DB constraint), so two concurrent creates can produce a duplicate.
@@ -401,7 +417,11 @@ Infrastructure (local dev — ALL RUNNING ✅):
 
 ## Test Status
 
-Verified 2026-10-01 after the teams/folders increment (clean `pnpm dev` stack, live OpenAI): **26/26 E2E** (journey 10 · edge-cases 7 · team 7 · ai-live 2)
+Verified 2026-10-02 after rate limiting: typecheck ✅ · web lint ✅ · API unit 22/22 · API integration **165/165**
+(+ rate-limit 6) · **E2E 26/26** non-live (journey 12 · edge-cases 7 · team 7) on `RATE_LIMIT_MULTIPLIER=20 pnpm dev`;
+the 2 rate-limit journeys also pass at production limits. ai-live not re-run (no key this session; no AI code changed).
+
+Previously verified 2026-10-01 after the teams/folders increment (clean `pnpm dev` stack, live OpenAI): **26/26 E2E** (journey 10 · edge-cases 7 · team 7 · ai-live 2)
 - `pnpm typecheck`: ✅ all 6 packages (API tests included)
 - Web lint: ✅ 0 problems · Web build: ✅
 - `apps/api` unit: ✅ 22/22 (auth 11 · credentials encryption/resolution 11)
@@ -437,8 +457,8 @@ Verified 2026-10-01 after the teams/folders increment (clean `pnpm dev` stack, l
 
 ## Current Git Branch & Commit
 
-- Branch: `main`, HEAD `2519f0d` (Phase 5)
-- Phase 6 is **uncommitted** in the working tree
+- Branch: `main`. `17b0d75` = Phase 6 + teams checkpoint; rate limiting committed on top (see `git log`)
+- No remote configured yet
 
 ---
 
