@@ -163,8 +163,9 @@ Deploy (roadmap Phase 8)     ██████████████░░░
 ## In Progress / Next Session
 
 1. ~~Commit the Phase 6 work~~ ✅ `17b0d75` (2026-10-02).
-2. ~~Push to GitHub~~ ✅ 2026-10-02 (`origin` = github.com/vikramoff24/docuAI). **Confirm CI goes green**: its first
-   run was on commits that predate the `fastify` dependency fix, so it was expected to fail at build.
+2. ~~Push to GitHub, CI green~~ ✅ 2026-10-02. CI run 37038380603 on `8e98c1e` passed every job (checks, integration,
+   E2E). The run before it failed only on the then-undeclared `fastify` dependency. Minor: the actions use Node 20,
+   which GitHub is deprecating; bump to newer action versions sometime.
 3. **Deploy (user):** follow `docs/deployment.md` on an Oracle Always Free VM.
 3. ~~Enable rate limiting~~ ✅ 2026-10-02 (ADR-013).
 4. Next feature: Phase 6 extras with human approval for destructive tools, **or** Phase 7 observability.
@@ -474,7 +475,7 @@ Previously verified 2026-10-01 after the teams/folders increment (clean `pnpm de
   token refresh, revoked-session logout, upload → search (XSS check), agent workflow to terminal state,
   agent → Settings banner, key validation/verification (9 total)
 - `pnpm db:check-migrations`: ✅
-- CI (`.github/workflows/ci.yml`): written; **not yet executed** (repo has no remote)
+- CI (`.github/workflows/ci.yml`): ✅ green on GitHub (2026-10-02)
 
 ---
 

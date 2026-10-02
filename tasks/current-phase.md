@@ -44,7 +44,7 @@ Single-VM Docker Compose stack behind Caddy; guide in `docs/deployment.md` (Orac
 Verified locally: E2E suite against the production stack, backups, and refusal to start without secrets.
 
 ## Next
-1. User: create the Oracle VM and follow `docs/deployment.md`. Get GitHub CI green.
+1. User: create the Oracle VM and follow `docs/deployment.md`. (GitHub CI is green.)
 2. Phase 6 extras below, or Phase 7 observability.
 
 ## Deferred to a later Phase 6 increment
