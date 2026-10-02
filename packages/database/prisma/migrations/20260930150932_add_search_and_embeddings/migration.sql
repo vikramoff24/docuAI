@@ -29,6 +29,9 @@
 -- these columns (raw queries handle the vector operations).
 -- ============================================================
 
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ── 1. Add embedding vector column to document_chunks ──────────────────────
 
 ALTER TABLE "document_chunks"

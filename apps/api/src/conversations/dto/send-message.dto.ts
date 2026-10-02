@@ -1,9 +1,11 @@
-import { IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsUUID, MinLength, MaxLength, ArrayMaxSize } from 'class-validator';
+import { Trim } from '../../common/transforms/string.transforms';
 
 export class SendMessageDto {
   /**
    * The user's message content.
    */
+  @Trim()
   @IsString()
   @MinLength(1)
   @MaxLength(10000)
@@ -15,6 +17,7 @@ export class SendMessageDto {
    */
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsUUID('4', { each: true })
   documentIds?: string[];
 }

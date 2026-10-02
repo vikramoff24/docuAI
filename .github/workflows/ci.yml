@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+  # Shared by every job that talks to the stack. Secrets here are CI-only throwaways.
+  NODE_ENV: test
+  DATABASE_URL: postgresql://docuflow:docuflow_secret@localhost:5432/docuflow_ci
+  REDIS_URL: redis://localhost:6379
+  JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef0123456789
+  JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef012345678
+  STORAGE_ENDPOINT: http://localhost:4566
+  STORAGE_REGION: us-east-1
+  STORAGE_ACCESS_KEY_ID: test
+  STORAGE_SECRET_ACCESS_KEY: test
+  STORAGE_BUCKET: docuflow-dev
+  STORAGE_FORCE_PATH_STYLE: 'true'
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  # ── Static checks + unit tests (no services) ──────────────────────────────
+  checks:
+    name: Typecheck · Lint · Unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - name: Build shared packages
+        run: pnpm --filter './packages/*' build
+      - name: Migration guard
+        run: pnpm db:check-migrations
+      - run: pnpm typecheck
+      - name: Lint (web)
+        run: pnpm --filter @docuflow/web lint
+      - name: Unit tests
+        run: pnpm --filter @docuflow/api test:unit
+      - name: Build apps
+        run: pnpm --filter './apps/*' build
+
+  # ── API integration tests against real Postgres/Redis/S3 ───────────────────
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: docuflow
+          POSTGRES_PASSWORD: docuflow_secret
+          POSTGRES_DB: docuflow_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U docuflow" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      localstack:
+        image: localstack/localstack:3
+        env:
+          SERVICES: s3
+        ports: ['4566:4566']
+        options: >-
+          --health-cmd "curl -sf http://localhost:4566/_localstack/health" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm --filter './packages/*' build
+      - name: Create S3 bucket (+ CORS for browser uploads)
+        run: |
+          aws --endpoint-url "$STORAGE_ENDPOINT" s3 mb "s3://$STORAGE_BUCKET"
+          aws --endpoint-url "$STORAGE_ENDPOINT" s3api put-bucket-cors --bucket "$STORAGE_BUCKET" \
+            --cors-configuration '{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE","HEAD"],"AllowedOrigins":["http://localhost:3000"],"ExposeHeaders":["ETag"]}]}'
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: Integration tests
+        run: pnpm --filter @docuflow/api exec jest --config jest-integration.config.ts --runInBand --forceExit
+
+  # ── Browser journeys against the full running stack ───────────────────────
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: checks
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: docuflow
+          POSTGRES_PASSWORD: docuflow_secret
+          POSTGRES_DB: docuflow_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U docuflow" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+      localstack:
+        image: localstack/localstack:3
+        env:
+          SERVICES: s3
+        ports: ['4566:4566']
+        options: >-
+          --health-cmd "curl -sf http://localhost:4566/_localstack/health" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm build
+      - name: Create S3 bucket (+ CORS for browser uploads)
+        run: |
+          aws --endpoint-url "$STORAGE_ENDPOINT" s3 mb "s3://$STORAGE_BUCKET"
+          aws --endpoint-url "$STORAGE_ENDPOINT" s3api put-bucket-cors --bucket "$STORAGE_BUCKET" \
+            --cors-configuration '{"CORSRules":[{"AllowedHeaders":["*"],"AllowedMethods":["GET","PUT","POST","DELETE","HEAD"],"AllowedOrigins":["http://localhost:3000"],"ExposeHeaders":["ETag"]}]}'
+      - run: pnpm db:migrate
+      - name: Start API, worker and web
+        run: |
+          (cd apps/api && PORT=3001 node dist/main > ../../api.log 2>&1 &)
+          (cd apps/worker && WORKER_PORT=3002 node dist/main > ../../worker.log 2>&1 &)
+          (cd apps/web && pnpm start > ../../web.log 2>&1 &)
+          npx --yes wait-on --timeout 60000 http://localhost:3001/api/v1/health http://localhost:3000
+      - name: Install Chromium
+        run: pnpm --filter @docuflow/web exec playwright install --with-deps chromium
+      - name: Run Playwright
+        run: pnpm --filter @docuflow/web test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:3000
+      - name: Upload report and server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            *.log
+          retention-days: 7

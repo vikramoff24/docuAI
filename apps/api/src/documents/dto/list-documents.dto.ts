@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, Min, Max, MaxLength, ValidateIf } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -18,13 +18,15 @@ export class ListDocumentsDto {
   @Type(() => Number)
   limit?: number = 20;
 
-  @ApiPropertyOptional({ description: 'Filter by folder ID' })
-  @IsString()
+  @ApiPropertyOptional({ description: 'Filter by folder ID, or "root" for documents not in a folder' })
+  @ValidateIf((o: ListDocumentsDto) => o.folderId !== undefined && o.folderId !== 'root')
+  @IsUUID()
   @IsOptional()
   folderId?: string;
 
   @ApiPropertyOptional({ description: 'Search by name' })
   @IsString()
+  @MaxLength(255)
   @IsOptional()
   search?: string;
 }

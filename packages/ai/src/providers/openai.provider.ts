@@ -79,10 +79,20 @@ export class OpenAIProvider implements AIProvider {
       topP,
       stop,
       systemPrompt,
+      tools,
     } = options;
 
     // Prepend system message if provided (and not already in messages)
     const fullMessages = this.buildMessages(messages, systemPrompt);
+
+    const formattedTools = tools?.map((t) => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.parameters,
+      },
+    }));
 
     const response = await this.client.chat.completions.create({
       model,
@@ -91,12 +101,19 @@ export class OpenAIProvider implements AIProvider {
       temperature,
       ...(topP !== undefined ? { top_p: topP } : {}),
       ...(stop ? { stop } : {}),
+      ...(formattedTools ? { tools: formattedTools } : {}),
     });
 
     const choice = response.choices[0];
     if (!choice) {
       throw new Error('OpenAI returned no choices');
     }
+
+    const toolCalls = choice.message.tool_calls?.map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: tc.function.arguments,
+    }));
 
     return {
       content: choice.message.content ?? '',
@@ -107,6 +124,7 @@ export class OpenAIProvider implements AIProvider {
         totalTokens: response.usage?.total_tokens ?? 0,
       },
       model: response.model,
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
     };
   }
 
@@ -210,7 +228,18 @@ export class OpenAIProvider implements AIProvider {
           tool_call_id: msg.toolCallId ?? 'unknown',
         });
       } else if (msg.role === 'assistant') {
-        openAiMessages.push({ role: 'assistant', content: msg.content });
+        const assistantMsg: OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam = {
+          role: 'assistant',
+          content: msg.content || null,
+        };
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          assistantMsg.tool_calls = msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.arguments },
+          }));
+        }
+        openAiMessages.push(assistantMsg);
       } else if (msg.role === 'user') {
         openAiMessages.push({ role: 'user', content: msg.content });
       } else {

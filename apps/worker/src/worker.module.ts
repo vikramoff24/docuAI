@@ -11,6 +11,8 @@ import { BullModule } from '@nestjs/bull';
 
 import { WorkerDatabaseModule } from './database/worker-database.module';
 import { DocumentProcessingModule } from './document-processing/document-processing.module';
+import { AgentWorkflowsModule } from './agent-workflows/agent-workflows.module';
+import { WorkerAiModule } from './ai/worker-ai.module';
 
 @Module({
   imports: [
@@ -61,7 +63,9 @@ import { DocumentProcessingModule } from './document-processing/document-process
 
     // ── Feature Modules ──────────────────────────────────────
     WorkerDatabaseModule,       // Prisma client for DB writes (global)
+    WorkerAiModule,             // AI providers + per-org key resolution (global)
     DocumentProcessingModule,
+    AgentWorkflowsModule,
   ],
 })
 export class WorkerModule {}

@@ -34,6 +34,7 @@ import { ConfigService } from '@nestjs/config';
 import { OrganizationMemberRole } from '@prisma/client';
 
 import { JwtPayload } from '../auth.service';
+import { DatabaseService } from '../../database/database.service';
 
 // This is what gets attached to req.user after JWT validation
 export interface RequestUser {
@@ -45,7 +46,10 @@ export interface RequestUser {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
-  constructor(private readonly config: ConfigService) {
+  constructor(
+    private readonly config: ConfigService,
+    private readonly db: DatabaseService,
+  ) {
     super({
       // Extract JWT from Authorization: Bearer <token> header
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -63,19 +67,29 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * Called after passport-jwt verifies the token signature and expiry.
    * Whatever we return here becomes req.user.
    *
-   * We could query the DB here for the full user, but for performance
-   * we return just what the JWT claims tell us.
+   * One indexed lookup per request keeps membership and role authoritative.
    */
-  validate(payload: JwtPayload): RequestUser {
+  async validate(payload: JwtPayload): Promise<RequestUser> {
     if (!payload.sub || !payload.email || !payload.organizationId) {
       throw new UnauthorizedException('Invalid token payload');
+    }
+
+    // The role claim is a snapshot from when the token was issued. Read the live
+    // membership so a removed member loses access, and a role change applies,
+    // immediately instead of when the 15-minute token expires.
+    const membership = await this.db.organizationMember.findUnique({
+      where: { userId_organizationId: { userId: payload.sub, organizationId: payload.organizationId } },
+      select: { role: true },
+    });
+    if (!membership) {
+      throw new UnauthorizedException('You are no longer a member of this organization');
     }
 
     return {
       userId: payload.sub,
       email: payload.email,
       organizationId: payload.organizationId,
-      role: payload.role,
+      role: membership.role,
     };
   }
 }

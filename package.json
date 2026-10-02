@@ -1,8 +1,9 @@
 {
   "name": "docuflow-ai",
   "version": "0.1.0",
+  "packageManager": "pnpm@9.15.9",
   "private": true,
-  "description": "DocuFlow AI — Enterprise Document Management System",
+  "description": "DocuFlow AI \u2014 Enterprise Document Management System",
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
@@ -27,7 +28,8 @@
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f",
-    "infra:reset": "docker compose down -v && docker compose up -d"
+    "infra:reset": "docker compose down -v && docker compose up -d",
+    "db:check-migrations": "bash scripts/check-migrations.sh"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

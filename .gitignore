@@ -64,3 +64,6 @@ secrets/
 tmp/
 temp/
 .tmp/
+
+# TypeScript incremental build info
+*.tsbuildinfo

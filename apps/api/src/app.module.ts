@@ -46,6 +46,7 @@ import { FoldersModule } from './folders/folders.module';
 import { SearchModule } from './search/search.module';
 import { AIModule } from './ai/ai.module';
 import { ConversationsModule } from './conversations/conversations.module';
+import { AgentModule } from './agent/agent.module';
 import appConfig from './config/app.config';
 import { validateConfig } from './config/config.validation';
 
@@ -142,8 +143,8 @@ import { validateConfig } from './config/config.validation';
     SearchModule,
     AIModule,
     ConversationsModule,
+    AgentModule,
 
-    // TODO Phase 6: AgentModule
     // TODO Phase 5: AuditModule
   ],
   controllers: [AppController],

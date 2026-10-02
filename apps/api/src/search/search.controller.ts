@@ -89,13 +89,14 @@ export class SearchController {
   @HttpCode(HttpStatus.OK)
   async suggest(
     @CurrentUser() user: RequestUser,
-    @Query('q') q: string,
+    @Query('q') q: unknown,
   ) {
-    if (!q || q.trim().length < 2) {
+    // ?q=a&q=b arrives as an array; anything but a single string gets no suggestions
+    if (typeof q !== 'string' || q.trim().length < 2) {
       return { suggestions: [] };
     }
 
-    const suggestions = await this.searchService.suggest(user.organizationId, q.trim());
+    const suggestions = await this.searchService.suggest(user.organizationId, q.trim().slice(0, 200));
     return { suggestions };
   }
 }

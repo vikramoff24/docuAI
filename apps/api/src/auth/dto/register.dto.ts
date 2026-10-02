@@ -1,5 +1,6 @@
-import { IsEmail, IsString, MinLength, MaxLength, Matches } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, MinLength, MaxLength, Matches, IsOptional, IsUUID, ValidateIf } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { NormalizeEmail, Trim } from '../../common/transforms/string.transforms';
 
 /**
  * Data Transfer Object (DTO) for user registration.
@@ -31,7 +32,9 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 export class RegisterDto {
   @ApiProperty({ example: 'alice@acme.com' })
+  @NormalizeEmail()
   @IsEmail({}, { message: 'Please provide a valid email address' })
+  @MaxLength(254)
   email!: string;
 
   @ApiProperty({ example: 'Password123!', minLength: 8 })
@@ -45,18 +48,29 @@ export class RegisterDto {
   password!: string;
 
   @ApiProperty({ example: 'Alice' })
+  @Trim()
   @IsString()
+  @IsNotEmpty({ message: 'First name is required' })
   @MaxLength(50)
   firstName!: string;
 
   @ApiProperty({ example: 'Smith' })
+  @Trim()
   @IsString()
+  @IsNotEmpty({ message: 'Last name is required' })
   @MaxLength(50)
   lastName!: string;
 
-  @ApiProperty({ example: 'Acme Corp' })
+  @ApiProperty({ example: 'Acme Corp', description: 'Required unless signing up through an invitation' })
+  @ValidateIf((o: RegisterDto) => !o.invitationToken)
+  @Trim()
   @IsString()
   @MinLength(2, { message: 'Organization name must be at least 2 characters' })
   @MaxLength(100)
-  organizationName!: string;
+  organizationName?: string;
+
+  @ApiPropertyOptional({ description: 'Invitation token: join that organization instead of creating one' })
+  @IsOptional()
+  @IsUUID('all', { message: 'Invalid invitation link' })
+  invitationToken?: string;
 }

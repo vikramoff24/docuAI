@@ -4,11 +4,12 @@
  * Sections:
  * 1. Navigation
  * 2. Hero
- * 3. Features Grid
- * 4. How It Works
- * 5. Testimonials / Social Proof
- * 6. CTA
- * 7. Footer
+ * 3. Product Preview
+ * 4. Features Grid
+ * 5. How It Works
+ * 6. Pricing
+ * 7. CTA
+ * 8. Footer
  */
 
 import Link from "next/link";
@@ -95,6 +96,26 @@ function IconCheck() {
   );
 }
 
+function IconGitBranch() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="18" r="3"/>
+      <circle cx="6" cy="6" r="3"/>
+      <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+      <path d="M11 18H8a2 2 0 0 1-2-2V9"/>
+    </svg>
+  );
+}
+
+function IconChart() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 3v18h18"/>
+      <path d="m19 9-5 5-4-4-3 3"/>
+    </svg>
+  );
+}
+
 /* ──────────────────────────────────────────────
    Feature Card
 ────────────────────────────────────────────── */
@@ -109,21 +130,17 @@ interface FeatureCardProps {
 function FeatureCard({ icon, title, description, color, delay }: FeatureCardProps) {
   return (
     <div
-      className={`glass-card p-6 hover-lift animate-fade-up opacity-0 ${delay}`}
-      style={{ animationFillMode: "forwards" }}
+      className={`glass-card feature-card animate-fade-up ${delay}`}
+      style={{ animationFillMode: "forwards", opacity: 0 }}
     >
       <div
-        className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
+        className="feature-card-icon"
         style={{ background: color, boxShadow: `0 0 24px ${color}50` }}
       >
-        <span style={{ color: "white" }}>{icon}</span>
+        {icon}
       </div>
-      <h3 className="text-lg font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
-        {title}
-      </h3>
-      <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-        {description}
-      </p>
+      <h3 className="feature-card-title">{title}</h3>
+      <p className="feature-card-desc">{description}</p>
     </div>
   );
 }
@@ -141,22 +158,13 @@ interface StepCardProps {
 function StepCard({ number, title, description, delay }: StepCardProps) {
   return (
     <div
-      className={`relative animate-fade-up opacity-0 ${delay}`}
-      style={{ animationFillMode: "forwards" }}
+      className={`animate-fade-up ${delay}`}
+      style={{ animationFillMode: "forwards", opacity: 0 }}
     >
-      <div className="glass-card p-8 h-full">
-        <div
-          className="text-5xl font-black mb-4 gradient-text"
-          style={{ fontVariantNumeric: "tabular-nums" }}
-        >
-          {number}
-        </div>
-        <h3 className="text-xl font-semibold mb-3" style={{ color: "var(--text-primary)" }}>
-          {title}
-        </h3>
-        <p className="leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-          {description}
-        </p>
+      <div className="glass-card step-card">
+        <div className="step-number gradient-text">{number}</div>
+        <h3 className="step-title">{title}</h3>
+        <p className="step-desc">{description}</p>
       </div>
     </div>
   );
@@ -172,9 +180,9 @@ interface StatBadgeProps {
 
 function StatBadge({ value, label }: StatBadgeProps) {
   return (
-    <div className="text-center">
-      <div className="text-3xl font-black gradient-text mb-1">{value}</div>
-      <div className="text-sm" style={{ color: "var(--text-muted)" }}>{label}</div>
+    <div className="stat-badge">
+      <div className="stat-value gradient-text">{value}</div>
+      <div className="stat-label">{label}</div>
     </div>
   );
 }
@@ -196,54 +204,42 @@ interface PricingCardProps {
 function PricingCard({ name, price, period, description, features, highlighted, badge, delay }: PricingCardProps) {
   return (
     <div
-      className={`relative p-8 animate-fade-up opacity-0 ${delay} ${highlighted ? "glass-card-bright" : "glass-card"}`}
+      className={`pricing-card animate-fade-up ${delay} ${highlighted ? "glass-card-bright" : "glass-card"}`}
       style={{
         animationFillMode: "forwards",
+        opacity: 0,
         border: highlighted ? "1px solid hsl(252, 60%, 50%, 0.5)" : undefined,
       }}
     >
-      {badge && (
-        <div
-          className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-bold px-4 py-1 rounded-full"
-          style={{
-            background: "linear-gradient(135deg, hsl(252, 78%, 58%), hsl(270, 82%, 62%))",
-            color: "white",
-          }}
-        >
-          {badge}
+      {badge && <div className="pricing-badge">{badge}</div>}
+      <div style={{ marginBottom: "1.5rem" }}>
+        <div className="pricing-name">{name}</div>
+        <div className="pricing-price">
+          <span className="pricing-amount">{price}</span>
+          {period && <span className="pricing-period">{period}</span>}
         </div>
-      )}
-      <div className="mb-6">
-        <div className="text-sm font-semibold uppercase tracking-widest mb-2" style={{ color: "var(--brand-400)" }}>
-          {name}
-        </div>
-        <div className="flex items-end gap-2 mb-2">
-          <span className="text-4xl font-black" style={{ color: "var(--text-primary)" }}>{price}</span>
-          <span className="mb-1" style={{ color: "var(--text-muted)" }}>{period}</span>
-        </div>
-        <p className="text-sm" style={{ color: "var(--text-secondary)" }}>{description}</p>
+        <p className="pricing-desc">{description}</p>
       </div>
-      <ul className="space-y-3 mb-8">
+      <ul className="pricing-features">
         {features.map((f) => (
-          <li key={f} className="flex items-center gap-3 text-sm" style={{ color: "var(--text-secondary)" }}>
-            <span
-              className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ background: "hsl(252, 78%, 54%, 0.2)", color: "var(--brand-400)" }}
-            >
+          <li key={f} className="pricing-feature">
+            <span className="pricing-feature-icon">
               <IconCheck />
             </span>
             {f}
           </li>
         ))}
       </ul>
-      <a
-        href="#"
-        className={highlighted ? "btn-primary w-full justify-center" : "btn-secondary w-full justify-center"}
-        style={{ display: "flex" }}
-      >
-        <span>Get started</span>
-        {highlighted && <IconArrowRight />}
-      </a>
+      <div className="pricing-cta">
+        <a
+          href="/signup"
+          className={highlighted ? "btn-primary" : "btn-secondary"}
+          style={{ justifyContent: "center", width: "100%" }}
+        >
+          <span>Get started</span>
+          {highlighted && <IconArrowRight />}
+        </a>
+      </div>
     </div>
   );
 }
@@ -253,21 +249,27 @@ function PricingCard({ name, price, period, description, features, highlighted, 
 ────────────────────────────────────────────── */
 export default function HomePage() {
   return (
-    <div className="relative min-h-screen grid-pattern">
+    <div className="grid-pattern" style={{ position: "relative", minHeight: "100vh" }}>
       {/* ── Decorative Orbs ── */}
       <div
-        className="fixed top-1/4 -left-64 w-[500px] h-[500px] rounded-full pointer-events-none animate-pulse-glow"
+        className="orb animate-pulse-glow"
         style={{
+          top: "25%",
+          left: "-256px",
+          width: "500px",
+          height: "500px",
           background: "radial-gradient(circle, hsl(252, 80%, 40%, 0.15) 0%, transparent 70%)",
-          filter: "blur(40px)",
         }}
         aria-hidden="true"
       />
       <div
-        className="fixed top-2/3 -right-64 w-[600px] h-[600px] rounded-full pointer-events-none animate-pulse-glow delay-300"
+        className="orb animate-pulse-glow delay-300"
         style={{
+          top: "66%",
+          right: "-256px",
+          width: "600px",
+          height: "600px",
           background: "radial-gradient(circle, hsl(270, 80%, 35%, 0.1) 0%, transparent 70%)",
-          filter: "blur(40px)",
         }}
         aria-hidden="true"
       />
@@ -275,25 +277,11 @@ export default function HomePage() {
       {/* ────────────────────────────────────────
           NAVIGATION
       ──────────────────────────────────────── */}
-      <header
-        className="fixed top-0 left-0 right-0 z-50"
-        style={{
-          background: "hsl(225, 30%, 7%, 0.8)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          borderBottom: "1px solid hsl(220, 15%, 15%, 0.8)",
-        }}
-      >
-        <nav className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <header className="navbar" id="hero">
+        <nav className="navbar-inner">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-3" aria-label="DocuFlow AI home">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{
-                background: "linear-gradient(135deg, hsl(252, 78%, 58%), hsl(270, 82%, 62%))",
-                boxShadow: "0 0 20px hsl(252, 78%, 54%, 0.4)",
-              }}
-            >
+          <Link href="/" className="logo-link" aria-label="DocuFlow AI home">
+            <div className="logo-icon">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                 <polyline points="14 2 14 8 20 8" />
@@ -302,31 +290,32 @@ export default function HomePage() {
                 <line x1="10" y1="9" x2="8" y2="9" />
               </svg>
             </div>
-            <span className="font-bold text-lg" style={{ color: "var(--text-primary)" }}>
+            <span className="logo-text">
               DocuFlow <span className="gradient-text">AI</span>
             </span>
           </Link>
 
           {/* Nav Links */}
-          <div className="hidden md:flex items-center gap-8">
-            {["Features", "How it works", "Pricing", "Docs"].map((item) => (
+          <div className="nav-links">
+            {[
+              { label: "Features", href: "#features" },
+              { label: "How it works", href: "#how-it-works" },
+              { label: "Pricing", href: "#pricing" },
+            ].map((item) => (
               <a
-                key={item}
-                href={`#${item.toLowerCase().replace(/\s+/g, "-")}`}
-                className="nav-link text-sm font-medium"
+                key={item.label}
+                href={item.href}
+                className="nav-link"
+                style={{ fontSize: "0.875rem", fontWeight: 500 }}
               >
-                {item}
+                {item.label}
               </a>
             ))}
           </div>
 
           {/* CTA Buttons */}
-          <div className="flex items-center gap-3">
-            <a
-              href="/login"
-              className="hidden sm:block text-sm font-medium px-4 py-2 rounded-lg transition-colors duration-200"
-              style={{ color: "var(--text-secondary)" }}
-            >
+          <div className="nav-actions">
+            <a href="/login" className="sign-in-link">
               Sign in
             </a>
             <a href="/signup" className="btn-primary" style={{ padding: "10px 20px", fontSize: "14px" }}>
@@ -340,33 +329,21 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             HERO SECTION
         ──────────────────────────────────────── */}
-        <section
-          className="relative pt-40 pb-32 px-6 text-center overflow-hidden"
-          aria-labelledby="hero-heading"
-        >
+        <section className="hero-section" aria-labelledby="hero-heading">
           {/* Badge */}
           <div
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium mb-8 animate-fade-up opacity-0"
-            style={{
-              animationFillMode: "forwards",
-              background: "hsl(252, 78%, 54%, 0.15)",
-              border: "1px solid hsl(252, 78%, 54%, 0.3)",
-              color: "var(--brand-300)",
-            }}
+            className="hero-badge animate-fade-up"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
           >
-            <span
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{ background: "var(--brand-400)" }}
-              aria-hidden="true"
-            />
+            <span className="pulse-dot" aria-hidden="true" />
             Now in beta — AI-powered document intelligence
           </div>
 
           {/* Headline */}
           <h1
             id="hero-heading"
-            className="text-5xl sm:text-6xl lg:text-7xl font-black mb-6 leading-tight animate-fade-up opacity-0 delay-100"
-            style={{ animationFillMode: "forwards" }}
+            className="hero-heading animate-fade-up delay-100"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
           >
             Your documents,
             <br />
@@ -375,8 +352,8 @@ export default function HomePage() {
 
           {/* Sub-headline */}
           <p
-            className="max-w-2xl mx-auto text-lg sm:text-xl mb-10 leading-relaxed animate-fade-up opacity-0 delay-200"
-            style={{ color: "var(--text-secondary)", animationFillMode: "forwards" }}
+            className="hero-sub animate-fade-up delay-200"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
           >
             DocuFlow AI is an enterprise document management system with semantic search,
             instant AI summaries, and an intelligent agent that understands, organizes,
@@ -385,8 +362,8 @@ export default function HomePage() {
 
           {/* CTA Buttons */}
           <div
-            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16 animate-fade-up opacity-0 delay-300"
-            style={{ animationFillMode: "forwards" }}
+            className="hero-cta animate-fade-up delay-300"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
           >
             <a href="/signup" className="btn-primary">
               <span>Start for free</span>
@@ -403,15 +380,15 @@ export default function HomePage() {
 
           {/* Stats */}
           <div
-            className="flex flex-wrap items-center justify-center gap-12 animate-fade-up opacity-0 delay-400"
-            style={{ animationFillMode: "forwards" }}
+            className="hero-stats animate-fade-up delay-400"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
           >
             <StatBadge value="10x" label="Faster document search" />
-            <div className="w-px h-8" style={{ background: "var(--border-color)" }} aria-hidden="true" />
+            <div className="stat-divider" aria-hidden="true" />
             <StatBadge value="< 2s" label="AI summary generation" />
-            <div className="w-px h-8" style={{ background: "var(--border-color)" }} aria-hidden="true" />
+            <div className="stat-divider" aria-hidden="true" />
             <StatBadge value="99.9%" label="Uptime SLA" />
-            <div className="w-px h-8" style={{ background: "var(--border-color)" }} aria-hidden="true" />
+            <div className="stat-divider" aria-hidden="true" />
             <StatBadge value="SOC 2" label="Compliant" />
           </div>
         </section>
@@ -419,35 +396,24 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             PRODUCT PREVIEW (Mock UI)
         ──────────────────────────────────────── */}
-        <section className="px-6 pb-32">
-          <div className="max-w-5xl mx-auto animate-scale-in opacity-0 delay-500" style={{ animationFillMode: "forwards" }}>
-            <div
-              className="glass-card overflow-hidden hover-glow"
-              style={{ border: "1px solid hsl(252, 40%, 30%, 0.4)" }}
-            >
+        <section className="product-preview">
+          <div
+            className="animate-scale-in delay-500"
+            style={{ animationFillMode: "forwards", opacity: 0 }}
+          >
+            <div className="glass-card preview-window">
               {/* Window Chrome */}
-              <div
-                className="flex items-center gap-2 px-5 py-4"
-                style={{ borderBottom: "1px solid var(--border-color)" }}
-              >
-                <div className="w-3 h-3 rounded-full" style={{ background: "#ff5f57" }} aria-hidden="true" />
-                <div className="w-3 h-3 rounded-full" style={{ background: "#febc2e" }} aria-hidden="true" />
-                <div className="w-3 h-3 rounded-full" style={{ background: "#28c840" }} aria-hidden="true" />
-                <div
-                  className="flex-1 mx-4 px-4 py-1.5 rounded-lg text-xs text-center"
-                  style={{ background: "var(--bg-tertiary)", color: "var(--text-muted)" }}
-                >
-                  app.docuflow.ai/documents
-                </div>
+              <div className="preview-chrome">
+                <div className="preview-dot" style={{ background: "#ff5f57" }} aria-hidden="true" />
+                <div className="preview-dot" style={{ background: "#febc2e" }} aria-hidden="true" />
+                <div className="preview-dot" style={{ background: "#28c840" }} aria-hidden="true" />
+                <div className="preview-url">app.docuflow.ai/documents</div>
               </div>
 
               {/* App Layout */}
-              <div className="flex h-96">
+              <div className="preview-layout">
                 {/* Sidebar */}
-                <div
-                  className="w-56 flex-shrink-0 p-4 space-y-1"
-                  style={{ borderRight: "1px solid var(--border-color)" }}
-                >
+                <div className="preview-sidebar">
                   {[
                     { icon: "📁", label: "All Documents", active: false },
                     { icon: "⭐", label: "Starred", active: false },
@@ -458,11 +424,11 @@ export default function HomePage() {
                   ].map(({ icon, label, active }) => (
                     <div
                       key={label}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer transition-colors"
+                      className="preview-sidebar-item"
                       style={{
                         background: active ? "hsl(252, 78%, 54%, 0.2)" : "transparent",
                         color: active ? "var(--brand-300)" : "var(--text-secondary)",
-                        border: active ? "1px solid hsl(252, 78%, 54%, 0.3)" : "1px solid transparent",
+                        borderColor: active ? "hsl(252, 78%, 54%, 0.3)" : "transparent",
                       }}
                     >
                       <span aria-hidden="true">{icon}</span>
@@ -472,58 +438,35 @@ export default function HomePage() {
                 </div>
 
                 {/* Main Content */}
-                <div className="flex-1 p-6">
+                <div className="preview-main">
                   {/* Search Bar */}
-                  <div
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl mb-6"
-                    style={{ background: "var(--bg-tertiary)", border: "1px solid hsl(252, 60%, 40%, 0.3)" }}
-                  >
+                  <div className="preview-search">
                     <span style={{ color: "var(--brand-400)" }} aria-hidden="true"><IconSearch /></span>
-                    <span style={{ color: "var(--text-muted)" }} className="text-sm">
+                    <span className="preview-search-text">
                       Ask anything about your documents...
                     </span>
-                    <span
-                      className="ml-auto text-xs px-2 py-1 rounded-md"
-                      style={{ background: "hsl(252, 78%, 54%, 0.15)", color: "var(--brand-400)" }}
-                    >
-                      AI
-                    </span>
+                    <span className="preview-search-badge">AI</span>
                   </div>
 
                   {/* Document List */}
-                  <div className="space-y-3">
+                  <div className="preview-doc-list">
                     {[
                       { name: "Q3 Financial Report 2026.pdf", size: "2.4 MB", time: "2h ago", status: "summarized" },
                       { name: "Engineering Architecture ADR-007.md", size: "48 KB", time: "Yesterday", status: "indexed" },
                       { name: "Product Roadmap — H2 2026.pptx", size: "8.1 MB", time: "3 days ago", status: "summarized" },
                     ].map(({ name, size, time, status }) => (
-                      <div
-                        key={name}
-                        className="flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-colors"
-                        style={{
-                          background: "hsl(220, 20%, 13%, 0.6)",
-                          border: "1px solid var(--border-subtle)",
-                        }}
-                      >
-                        <div
-                          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{ background: "hsl(252, 78%, 54%, 0.15)" }}
-                          aria-hidden="true"
-                        >
+                      <div key={name} className="preview-doc-row">
+                        <div className="preview-doc-icon" aria-hidden="true">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="hsl(252, 78%, 70%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                           </svg>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate" style={{ color: "var(--text-primary)" }}>
-                            {name}
-                          </div>
-                          <div className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                            {size} · {time}
-                          </div>
+                        <div className="preview-doc-info">
+                          <div className="preview-doc-name">{name}</div>
+                          <div className="preview-doc-meta">{size} · {time}</div>
                         </div>
                         <span
-                          className="text-xs px-2 py-1 rounded-full flex-shrink-0"
+                          className="preview-doc-status"
                           style={{
                             background: status === "summarized" ? "hsl(155, 75%, 50%, 0.15)" : "hsl(252, 78%, 54%, 0.15)",
                             color: status === "summarized" ? "hsl(155, 75%, 55%)" : "var(--brand-400)",
@@ -543,18 +486,18 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             FEATURES GRID
         ──────────────────────────────────────── */}
-        <section id="features" className="px-6 py-24" aria-labelledby="features-heading">
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 id="features-heading" className="text-3xl sm:text-4xl font-black mb-4">
+        <section id="features" className="section" aria-labelledby="features-heading">
+          <div className="container-6xl">
+            <div className="section-header">
+              <h2 id="features-heading" className="section-title">
                 Everything your team needs
               </h2>
-              <p className="text-lg max-w-xl mx-auto" style={{ color: "var(--text-secondary)" }}>
+              <p className="section-sub">
                 From intelligent search to autonomous document management — DocuFlow AI has you covered.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="features-grid">
               <FeatureCard
                 icon={<IconSearch />}
                 title="Semantic Search"
@@ -605,14 +548,14 @@ export default function HomePage() {
                 delay="delay-100"
               />
               <FeatureCard
-                icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>}
+                icon={<IconGitBranch />}
                 title="API-First Design"
                 description="Full REST API with OpenAPI documentation. Integrate DocuFlow AI into your existing workflows, CRMs, and internal tools effortlessly."
                 color="hsl(280, 75%, 58%)"
                 delay="delay-200"
               />
               <FeatureCard
-                icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>}
+                icon={<IconChart />}
                 title="Usage Analytics"
                 description="Understand how your team uses documents. Track searches, views, AI interactions, and identify your most valuable knowledge assets."
                 color="hsl(0, 75%, 58%)"
@@ -625,19 +568,19 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             HOW IT WORKS
         ──────────────────────────────────────── */}
-        <section id="how-it-works" className="px-6 py-24" aria-labelledby="how-heading">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 id="how-heading" className="text-3xl sm:text-4xl font-black mb-4">
+        <section id="how-it-works" className="section" aria-labelledby="how-heading">
+          <div className="container-5xl">
+            <div className="section-header">
+              <h2 id="how-heading" className="section-title">
                 Up and running in{" "}
                 <span className="gradient-text">3 simple steps</span>
               </h2>
-              <p className="text-lg max-w-xl mx-auto" style={{ color: "var(--text-secondary)" }}>
+              <p className="section-sub">
                 No complex setup. No data migration headaches. Just powerful AI document management from day one.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="steps-grid">
               <StepCard
                 number="01"
                 title="Upload your documents"
@@ -663,18 +606,18 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             PRICING
         ──────────────────────────────────────── */}
-        <section id="pricing" className="px-6 py-24" aria-labelledby="pricing-heading">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 id="pricing-heading" className="text-3xl sm:text-4xl font-black mb-4">
+        <section id="pricing" className="section" aria-labelledby="pricing-heading">
+          <div className="container-5xl">
+            <div className="section-header">
+              <h2 id="pricing-heading" className="section-title">
                 Simple, transparent pricing
               </h2>
-              <p className="text-lg max-w-xl mx-auto" style={{ color: "var(--text-secondary)" }}>
+              <p className="section-sub">
                 Start free, scale as you grow. No hidden fees, no surprises.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+            <div className="pricing-grid">
               <PricingCard
                 name="Starter"
                 price="$0"
@@ -729,28 +672,28 @@ export default function HomePage() {
         {/* ────────────────────────────────────────
             CTA SECTION
         ──────────────────────────────────────── */}
-        <section className="px-6 py-24">
-          <div className="max-w-3xl mx-auto text-center">
+        <section className="section">
+          <div className="container-3xl">
             <div
-              className="glass-card-bright p-12 animate-fade-up opacity-0"
-              style={{ animationFillMode: "forwards" }}
+              className="glass-card-bright cta-card animate-fade-up"
+              style={{ animationFillMode: "forwards", opacity: 0 }}
             >
-              <h2 className="text-3xl sm:text-4xl font-black mb-4">
+              <h2 className="cta-title">
                 Ready to transform how your
                 <br />
                 team works with documents?
               </h2>
-              <p className="text-lg mb-10" style={{ color: "var(--text-secondary)" }}>
+              <p className="cta-desc">
                 Join thousands of teams using DocuFlow AI to unlock the knowledge
                 trapped in their documents.
               </p>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <div className="cta-actions">
                 <a href="/signup" className="btn-primary">
                   <span>Start for free — no credit card needed</span>
                   <IconArrowRight />
                 </a>
               </div>
-              <p className="mt-6 text-sm" style={{ color: "var(--text-muted)" }}>
+              <p style={{ marginTop: "1.5rem", fontSize: "0.875rem", color: "var(--text-muted)" }}>
                 14-day free trial on all paid plans · Cancel any time
               </p>
             </div>
@@ -761,41 +704,37 @@ export default function HomePage() {
       {/* ────────────────────────────────────────
           FOOTER
       ──────────────────────────────────────── */}
-      <footer
-        className="px-6 py-12"
-        style={{ borderTop: "1px solid var(--border-subtle)" }}
-      >
-        <div className="max-w-6xl mx-auto">
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-8">
+      <footer className="footer">
+        <div className="footer-inner">
+          <div className="footer-top">
             {/* Brand */}
             <div>
-              <div className="flex items-center gap-3 mb-3">
+              <div className="footer-brand">
                 <div
-                  className="w-7 h-7 rounded-lg flex items-center justify-center"
-                  style={{ background: "linear-gradient(135deg, hsl(252, 78%, 58%), hsl(270, 82%, 62%))" }}
+                  className="logo-icon"
+                  style={{ width: 28, height: 28 }}
                   aria-hidden="true"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                   </svg>
                 </div>
-                <span className="font-bold" style={{ color: "var(--text-primary)" }}>
+                <span className="logo-text" style={{ fontSize: "1rem" }}>
                   DocuFlow <span className="gradient-text">AI</span>
                 </span>
               </div>
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              <p style={{ fontSize: "0.875rem", color: "var(--text-muted)" }}>
                 Enterprise Document Intelligence
               </p>
             </div>
 
             {/* Links */}
-            <div className="flex flex-wrap gap-x-8 gap-y-3">
+            <div className="footer-links">
               {["Privacy", "Terms", "Security", "Status", "API Docs"].map((link) => (
                 <a
                   key={link}
                   href="#"
-                  className="text-sm transition-colors duration-200"
-                  style={{ color: "var(--text-muted)" }}
+                  className="footer-link"
                 >
                   {link}
                 </a>
@@ -803,19 +742,12 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div
-            className="mt-8 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4"
-            style={{ borderTop: "1px solid var(--border-subtle)" }}
-          >
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          <div className="footer-bottom">
+            <p className="footer-copyright">
               © 2026 DocuFlow AI. All rights reserved.
             </p>
-            <div className="flex items-center gap-2 text-sm" style={{ color: "var(--text-muted)" }}>
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ background: "hsl(155, 75%, 50%)" }}
-                aria-hidden="true"
-              />
+            <div className="footer-status">
+              <span className="status-dot" aria-hidden="true" />
               All systems operational
             </div>
           </div>

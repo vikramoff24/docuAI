@@ -149,13 +149,29 @@ export class ConversationsService {
   // MESSAGING (RAG-powered)
   // ──────────────────────────────────────────────────────────────────────────
 
+  /** Throws 404 / 503 if a message can't be sent; called before the SSE stream opens. */
+  async assertCanSendMessage(conversationId: string, userId: string, organizationId: string) {
+    const conversation = await this.db.conversation.findFirst({
+      where: { id: conversationId, userId, organizationId },
+      select: { id: true },
+    });
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (!(await this.ragService.isAvailable(organizationId))) {
+      throw new ServiceUnavailableException(
+        'AI is not configured: an admin can add an OpenAI API key in Settings',
+      );
+    }
+  }
+
   /**
    * Send a message and get a streaming AI response.
    * Returns an AsyncGenerator of RAGStreamChunks for SSE transport.
    *
    * Side effects:
    * - Stores user message to DB before generation
-   * - Stores assistant message to DB after generation (with citations)
+   * - Stores assistant message to DB after a completed generation (with citations)
    */
   async *sendMessageStream(
     conversationId: string,
@@ -163,20 +179,8 @@ export class ConversationsService {
     organizationId: string,
     dto: SendMessageDto,
   ): AsyncGenerator<RAGStreamChunk> {
-    // Verify conversation exists and belongs to user
-    const conversation = await this.db.conversation.findFirst({
-      where: { id: conversationId, userId, organizationId },
-    });
-
-    if (!conversation) {
-      throw new NotFoundException('Conversation not found');
-    }
-
-    if (!this.ragService.isAvailable()) {
-      throw new ServiceUnavailableException(
-        'AI service unavailable: OPENAI_API_KEY not configured',
-      );
-    }
+    // Verify conversation exists, belongs to user, and AI is configured
+    await this.assertCanSendMessage(conversationId, userId, organizationId);
 
     // 1. Store user message
     await this.db.message.create({
@@ -219,8 +223,10 @@ export class ConversationsService {
     // 4. Stream the AI response, collecting the full content for DB storage
     let fullContent = '';
     let citationsData: unknown = [];
+    let completed = false;
 
     for await (const chunk of this.ragService.generateAnswerStream(
+      organizationId,
       dto.content,
       chunks,
       history,
@@ -229,8 +235,17 @@ export class ConversationsService {
         fullContent += chunk.content ?? '';
       } else if (chunk.type === 'citations') {
         citationsData = chunk.citations ?? [];
+      } else if (chunk.type === 'done') {
+        completed = true;
       }
       yield chunk;
+    }
+
+    // A failed or empty generation isn't an answer: don't persist it (it would
+    // also be fed back to the model as history on the next turn).
+    if (!completed || !fullContent.trim()) {
+      this.logger.warn(`Conversation ${conversationId}: stream did not complete; no answer stored`);
+      return;
     }
 
     // 5. Store assistant message with citations metadata

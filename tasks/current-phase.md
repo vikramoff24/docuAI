@@ -1,28 +1,49 @@
-# Phase 6: AI - Agentic Workflows
+# Phase 6: AI Agent — Workflows (end-to-end)
 
 ## Goal
-Implement a background task worker system that uses an LLM Agent to autonomously perform complex document processing workflows (e.g., categorizing an entire folder, extracting structured data from multiple documents, or identifying missing fields).
+Users describe a task in the UI, and an LLM agent carries it out in the background using tools that are tenant-scoped, role-checked and audited: categorizing documents, extracting data, or general metadata work. Design: `docs/adr/ADR-010-agent-workflows.md`.
 
-## Tasks
+## Status: ✅ Core complete (2026-10-01)
 
-1. **Agent Module (`apps/api/src/agent`)**
-   - Create `AgentModule` in the API.
-   - Implement `AgentService` that uses `@docuflow/ai` (OpenAI tool calling) to execute multi-step workflows.
+| Layer | Deliverable | Status |
+|---|---|---|
+| Database | `Workflow` model + `WorkflowStatus` enum; search columns declared `Unsupported` so Prisma stops dropping them | ✅ |
+| Backend API | `POST/GET /workflows`, `GET /workflows/:id`; MEMBER+ to create; `instructions` ≤ 2000 chars; audit on create | ✅ |
+| Worker | `agent_workflows` consumer: tool loop, 10-iteration cap, 60k-token budget, role re-check at run time | ✅ |
+| AI | `@docuflow/ai` tool calling (`tools`, `toolCalls`, assistant tool-call messages) | ✅ |
+| Tools | `searchDocuments`, `readDocument` (fenced untrusted content), `updateDocumentMetadata` (size limits + audit) | ✅ |
+| Frontend | Dashboard "AI Agent" tab: create form, history, live polling, result/error detail, viewer read-only | ✅ |
+| Frontend journey | Session auto-refresh on 401, cross-tab session sync, working uploads, XSS-safe search highlights | ✅ |
+| Unit tests | Refresh-token issue/rotate/reject (10 total in `auth.service.spec.ts`) | ✅ |
+| Integration | `test/agent.integration.ts` (18 tests) + regression tests in auth/documents | ✅ |
+| E2E | `apps/web/e2e/journey.spec.ts`: 7 browser journeys against the real stack | ✅ |
+| CI | `.github/workflows/ci.yml`: checks · integration · e2e, plus a migration guard | ✅ written, not yet run on GitHub (no remote) |
+| Docs | ADR-010, PROJECT_STATE, this file | ✅ |
+| Settings | OpenAI key set from the UI (verify → encrypt → use everywhere), ADR-011 | ✅ |
 
-2. **Workflows Table**
-   - Create a Prisma model for `Workflow` (id, type, status, output).
-   - Implement REST endpoints for managing workflow jobs.
+## Hardening pass (2026-10-01)
+Edge-case deep dive across FE and BE: SQL injection, invite escalation, viewer write access, email case, 500s on
+malformed input, folder rules, upload size, body-text search, races, chat error UX, pagination, cross-tab refresh.
+Details in PROJECT_STATE "Recent Changes". Tests: `test/edge-cases.integration.ts`, `e2e/edge-cases.spec.ts`.
 
-3. **Background Processing**
-   - Connect the worker (`apps/worker`) to consume `agent_workflows` queue.
-   - Add tool functions that the LLM can call:
-     - `searchDocuments(query, filters)`
-     - `readDocument(id)`
-     - `updateDocumentMetadata(id, data)`
+## Teams & workspace increment (2026-10-01) ✅
+Org switching, live membership checks, invitation links + landing/sign-up flow, Team tab (roles, removal, leave),
+folders UI (navigate, create, delete, move), retry + reindex. Design: `docs/adr/ADR-012-teams-and-org-switching.md`.
+Tests: `apps/api/test/team.integration.ts`, `apps/web/e2e/team.spec.ts`, reindex journey in `e2e/ai-live.spec.ts`.
 
-4. **Testing**
-   - Add integration tests mocking the LLM's tool calls and asserting the workflow executes correctly.
+## Deferred to a later Phase 6 increment
+- Remaining roadmap tools (`listFolders`, `createFolder`, `moveDocument`, `summarizeDocument`, `shareDocument`, `getAuditLogs`). These need a human-approval step for destructive or sharing actions.
+- Streaming progress (SSE) instead of polling.
+- Showing which documents a workflow changed, with links, in the UI.
+- Mobile layout for the dashboard sidebar (pre-existing, affects all tabs).
 
 ## Validation
-- `pnpm test:integration test/agent.integration.ts` passes.
-- Agent successfully plans and executes a test workflow using tool calling.
+```bash
+pnpm typecheck                                   # all packages + API tests
+pnpm --filter @docuflow/web lint
+pnpm --filter @docuflow/api test:unit
+pnpm --filter @docuflow/api test:integration     # needs docker compose up
+pnpm db:check-migrations
+cd apps/web && E2E_BASE_URL=http://localhost:3000 pnpm test:e2e   # needs pnpm dev running (journey + edge-cases)
+cd apps/web && E2E_OPENAI_KEY=sk-... E2E_BASE_URL=http://localhost:3000 pnpm test:e2e ai-live   # opt-in, real OpenAI
+```

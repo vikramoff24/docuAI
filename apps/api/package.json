@@ -2,7 +2,7 @@
   "name": "@docuflow/api",
   "version": "0.1.0",
   "private": true,
-  "description": "DocuFlow AI — NestJS REST API",
+  "description": "DocuFlow AI \u2014 NestJS REST API",
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
@@ -10,7 +10,7 @@
     "start": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,test}/**/*.ts\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p test/tsconfig.json",
     "test": "jest",
     "test:unit": "jest --testPathPattern='src/.*.spec.ts'",
     "test:integration": "jest --config jest-integration.config.ts --runInBand",

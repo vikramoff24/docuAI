@@ -1,0 +1,12 @@
+{
+  // Typechecks integration tests (excluded from the app build by ../tsconfig.json).
+  // rootDir is widened because agent tests import the worker's consumer directly.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "rootDir": "../..",
+    "types": ["jest", "node"]
+  },
+  "include": ["../src/**/*", "./**/*"]
+}

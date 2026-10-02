@@ -39,6 +39,7 @@ import {
   Res,
   ParseUUIDPipe,
   NotFoundException,
+  HttpException,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
@@ -148,7 +149,13 @@ export class ConversationsController {
     );
 
     // Set SSE headers
+    // Fail fast with a real HTTP status (404 / 503) before the stream starts
+    await this.conversationsService.assertCanSendMessage(id, user.userId, user.organizationId);
+
     res.raw.writeHead(200, {
+      // Keep headers already set on the reply (CORS, request id) — writeHead on
+      // the raw socket would otherwise drop them.
+      ...(res.getHeaders() as Record<string, string>),
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
@@ -169,7 +176,7 @@ export class ConversationsController {
       this.logger.error(`SSE stream error: ${err}`);
       const errorEvent = {
         type: 'error',
-        error: err instanceof Error ? err.message : 'Unknown error',
+        error: err instanceof HttpException ? err.message : 'Something went wrong. Please try again.',
       };
       res.raw.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
     } finally {

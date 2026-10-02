@@ -333,6 +333,18 @@ describe('Auth Integration Tests', () => {
 
   // ── Logout Tests ──────────────────────────────────────────────────────────
 
+  describe('malformed requests', () => {
+    it('returns 400 (not 500) for a JSON content-type with an empty body', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/logout')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Content-Type', 'application/json')
+        .expect(400);
+
+      expect(res.body.message).toMatch(/body cannot be empty/i);
+    });
+  });
+
   describe('POST /auth/logout', () => {
     let logoutAccessToken: string;
     let logoutRefreshToken: string;

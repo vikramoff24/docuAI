@@ -74,6 +74,8 @@ export class FoldersService {
         organizationId,
         parentId: parentId ?? null,
         deletedAt: null,
+        // The org's root folder ("/") is "no folder" in the UI, never a listed child
+        path: { not: '/' },
       },
       orderBy: { name: 'asc' },
       select: {
@@ -82,8 +84,23 @@ export class FoldersService {
         path: true,
         parentId: true,
         createdAt: true,
-        _count: { select: { children: true, documents: true } },
+        _count: {
+          select: {
+            children: { where: { deletedAt: null } },
+            documents: { where: { deletedAt: null } },
+          },
+        },
       },
+    });
+  }
+
+  /** Every folder in the organization, by path — for "move to…" pickers. */
+  async listAllFolders(organizationId: string) {
+    return this.db.folder.findMany({
+      where: { organizationId, deletedAt: null, path: { not: '/' } },
+      orderBy: { path: 'asc' },
+      take: 1000,
+      select: { id: true, name: true, path: true, parentId: true },
     });
   }
 
@@ -94,13 +111,22 @@ export class FoldersService {
   ) {
     const folder = await this.db.folder.findFirst({
       where: { id: folderId, organizationId, deletedAt: null },
-      include: { _count: { select: { children: true, documents: true } } },
+      include: {
+        // Soft-deleted items don't make a folder "non-empty"
+        _count: {
+          select: {
+            children: { where: { deletedAt: null } },
+            documents: { where: { deletedAt: null } },
+          },
+        },
+      },
     });
 
     if (!folder) throw new NotFoundException('Folder not found');
 
-    // Don't delete root folder
-    if (folder.parentId === null) {
+    // Don't delete the org's root folder (created at registration, path "/").
+    // Other top-level folders also have parentId = null and are deletable.
+    if (folder.path === '/') {
       throw new ConflictException('Cannot delete the root folder');
     }
 

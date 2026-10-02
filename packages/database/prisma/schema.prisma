@@ -37,10 +37,10 @@ enum OrganizationMemberRole {
 }
 
 enum DocumentStatus {
-  PENDING       // Just uploaded, awaiting confirmation
-  PROCESSING    // Worker is extracting text + generating embeddings
-  READY         // Fully processed, searchable
-  FAILED        // Processing failed (check processingError field)
+  PENDING // Just uploaded, awaiting confirmation
+  PROCESSING // Worker is extracting text + generating embeddings
+  READY // Fully processed, searchable
+  FAILED // Processing failed (check processingError field)
 }
 
 enum InvitationStatus {
@@ -48,6 +48,13 @@ enum InvitationStatus {
   ACCEPTED
   EXPIRED
   CANCELLED
+}
+
+enum WorkflowStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 enum MessageRole {
@@ -96,26 +103,28 @@ enum AuditAction {
 // ============================================================
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String
-  firstName    String?
-  lastName     String?
-  avatarUrl    String?
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String
+  firstName       String?
+  lastName        String?
+  avatarUrl       String?
   emailVerifiedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   // Relations
-  memberships       OrganizationMember[]
-  refreshTokens     RefreshToken[]
-  auditLogs         AuditLog[]
-  conversations     Conversation[]
-  createdDocuments  Document[]        @relation("CreatedByUser")
-  createdFolders    Folder[]          @relation("CreatedByUser")
-  documentShares    DocumentShare[]   @relation("SharedByUser")
-  receivedShares    DocumentShare[]   @relation("SharedWithUser")
-  invitationsSent   Invitation[]      @relation("InvitedByUser")
+  memberships          OrganizationMember[]
+  refreshTokens        RefreshToken[]
+  auditLogs            AuditLog[]
+  conversations        Conversation[]
+  createdDocuments     Document[]                 @relation("CreatedByUser")
+  createdFolders       Folder[]                   @relation("CreatedByUser")
+  documentShares       DocumentShare[]            @relation("SharedByUser")
+  receivedShares       DocumentShare[]            @relation("SharedWithUser")
+  invitationsSent      Invitation[]               @relation("InvitedByUser")
+  workflows            Workflow[]                 @relation("CreatedByUser")
+  aiCredentialsUpdated OrganizationAiCredential[] @relation("AiCredentialUpdatedBy")
 
   @@map("users")
 }
@@ -126,17 +135,21 @@ model User {
 // ============================================================
 
 model RefreshToken {
-  id          String   @id @default(uuid()) @db.Uuid
-  userId      String   @db.Uuid
-  tokenHash   String   @unique  // bcrypt hash of the actual token
-  family      String   // Token family for rotation attack detection
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  createdAt   DateTime @default(now())
-  userAgent   String?
-  ipAddress   String?
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  tokenHash      String    @unique // bcrypt hash of the actual token
+  family         String // Token family for rotation attack detection
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  userAgent      String?
+  ipAddress      String?
+  // The organization this session is acting in (set on login / org switch).
+  // Null for tokens issued before org switching existed → falls back to the oldest membership.
+  organizationId String?   @db.Uuid
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([family])
@@ -148,22 +161,25 @@ model RefreshToken {
 // ============================================================
 
 model Organization {
-  id          String           @id @default(uuid()) @db.Uuid
-  name        String
-  slug        String           @unique  // URL-safe identifier: "acme-corp"
-  plan        OrganizationPlan @default(FREE)
-  logoUrl     String?
-  settings    Json             @default("{}")  // Flexible org settings
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id        String           @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String           @unique // URL-safe identifier: "acme-corp"
+  plan      OrganizationPlan @default(FREE)
+  logoUrl   String?
+  settings  Json             @default("{}") // Flexible org settings
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   // Relations
-  members     OrganizationMember[]
-  invitations Invitation[]
-  folders     Folder[]
-  documents   Document[]
-  auditLogs   AuditLog[]
+  members       OrganizationMember[]
+  invitations   Invitation[]
+  folders       Folder[]
+  documents     Document[]
+  auditLogs     AuditLog[]
   conversations Conversation[]
+  workflows     Workflow[]
+  aiCredentials OrganizationAiCredential[]
+  refreshTokens RefreshToken[]
 
   @@map("organizations")
 }
@@ -197,16 +213,16 @@ model OrganizationMember {
 // ============================================================
 
 model Invitation {
-  id             String           @id @default(uuid()) @db.Uuid
-  organizationId String           @db.Uuid
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
   email          String
   role           OrganizationMemberRole @default(MEMBER)
-  token          String           @unique  // Sent in invitation email
-  status         InvitationStatus @default(PENDING)
-  invitedById    String           @db.Uuid
+  token          String                 @unique // Sent in invitation email
+  status         InvitationStatus       @default(PENDING)
+  invitedById    String                 @db.Uuid
   expiresAt      DateTime
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   invitedBy    User         @relation("InvitedByUser", fields: [invitedById], references: [id])
@@ -223,10 +239,10 @@ model Invitation {
 
 model Folder {
   id             String    @id @default(uuid()) @db.Uuid
-  organizationId String    @db.Uuid   // TENANT BOUNDARY
-  parentId       String?   @db.Uuid   // null = root folder
+  organizationId String    @db.Uuid // TENANT BOUNDARY
+  parentId       String?   @db.Uuid // null = root folder
   name           String
-  path           String    // Materialized path: "/root/sub/leaf" for fast queries
+  path           String // Materialized path: "/root/sub/leaf" for fast queries
   createdById    String    @db.Uuid
   deletedAt      DateTime? // Soft delete
   createdAt      DateTime  @default(now())
@@ -239,8 +255,8 @@ model Folder {
   createdBy    User         @relation("CreatedByUser", fields: [createdById], references: [id])
 
   @@index([organizationId])
-  @@index([organizationId, parentId])  // Composite: find children within org
-  @@index([path])                      // For path-based queries
+  @@index([organizationId, parentId]) // Composite: find children within org
+  @@index([path]) // For path-based queries
   @@map("folders")
 }
 
@@ -251,19 +267,19 @@ model Folder {
 
 model Document {
   id              String         @id @default(uuid()) @db.Uuid
-  organizationId  String         @db.Uuid   // TENANT BOUNDARY
+  organizationId  String         @db.Uuid // TENANT BOUNDARY
   folderId        String?        @db.Uuid
   name            String
   description     String?
   mimeType        String
-  sizeBytes       Int            // File size in bytes (max ~2GB with Int; we cap at 100MB)
-  storageKey      String         // S3 object key: "organizations/{orgId}/documents/{docId}/{filename}"
+  sizeBytes       Int // File size in bytes (max ~2GB with Int; we cap at 100MB)
+  storageKey      String // S3 object key: "organizations/{orgId}/documents/{docId}/{filename}"
   status          DocumentStatus @default(PENDING)
-  processingError String?        // Error message if status = FAILED
-  tags            String[]       // Array of tags for filtering
-  metadata        Json           @default("{}")  // Custom metadata (JSONB)
+  processingError String? // Error message if status = FAILED
+  tags            String[] // Array of tags for filtering
+  metadata        Json           @default("{}") // Custom metadata (JSONB)
   createdById     String         @db.Uuid
-  deletedAt       DateTime?      // Soft delete
+  deletedAt       DateTime? // Soft delete
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -273,15 +289,18 @@ model Document {
   chunks       DocumentChunk[]
   shares       DocumentShare[]
 
-  // NOTE: tsvector column and GIN full-text index are added via raw SQL migration
-  // They cannot be managed by Prisma schema directly
+  // Full-text search vector, maintained by the documents_search_vector_trigger (raw SQL).
+  // Declared here so `prisma migrate dev` does not generate a DROP COLUMN for it.
+  searchVector Unsupported("tsvector")?
 
   @@index([organizationId])
-  @@index([organizationId, folderId])   // List documents in a folder
-  @@index([organizationId, status])     // Filter by processing status
-  @@index([organizationId, createdAt(sort: Desc)])  // Recent documents
-  // NOTE: GIN indexes on tags[] and tsvector are created via raw SQL in migration files
-  // because Prisma doesn't support all GIN index configurations directly
+  @@index([organizationId, folderId]) // List documents in a folder
+  @@index([organizationId, status]) // Filter by processing status
+  @@index([organizationId, createdAt(sort: Desc)]) // Recent documents
+  // Search indexes (created in raw SQL migrations; declared here so Prisma doesn't drop them)
+  @@index([searchVector], type: Gin, map: "documents_search_vector_gin_idx")
+  @@index([tags], type: Gin, map: "documents_tags_gin_idx")
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "documents_name_trgm_idx")
   @@map("documents")
 }
 
@@ -291,15 +310,16 @@ model Document {
 // ============================================================
 
 model DocumentChunk {
-  id             String   @id @default(uuid()) @db.Uuid
-  documentId     String   @db.Uuid
-  organizationId String   @db.Uuid   // Denormalized for efficient tenant-scoped vector search
-  content        String   // The actual text of this chunk
-  chunkIndex     Int      // Position in document (0-based)
-  tokenCount     Int      // Approximate token count (for context window management)
-  metadata       Json     @default("{}")  // page number, section heading, etc.
-  // NOTE: embedding vector(1536) is added via raw SQL migration
-  // Prisma doesn't natively support the pgvector type yet without Unsupported()
+  id             String                       @id @default(uuid()) @db.Uuid
+  documentId     String                       @db.Uuid
+  organizationId String                       @db.Uuid // Denormalized for efficient tenant-scoped vector search
+  content        String // The actual text of this chunk
+  chunkIndex     Int // Position in document (0-based)
+  tokenCount     Int // Approximate token count (for context window management)
+  metadata       Json                         @default("{}") // page number, section heading, etc.
+  // pgvector embedding, read/written via raw SQL only.
+  // Declared here so `prisma migrate dev` does not generate a DROP COLUMN for it.
+  embedding      Unsupported("vector(1536)")?
 
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -320,8 +340,8 @@ model DocumentShare {
   id           String    @id @default(uuid()) @db.Uuid
   documentId   String    @db.Uuid
   sharedById   String    @db.Uuid
-  sharedWithId String?   @db.Uuid  // null = public link
-  token        String?   @unique   // For public share links
+  sharedWithId String?   @db.Uuid // null = public link
+  token        String?   @unique // For public share links
   canDownload  Boolean   @default(true)
   expiresAt    DateTime?
   createdAt    DateTime  @default(now())
@@ -342,7 +362,7 @@ model DocumentShare {
 
 model Conversation {
   id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid   // TENANT BOUNDARY
+  organizationId String   @db.Uuid // TENANT BOUNDARY
   userId         String   @db.Uuid
   title          String?
   createdAt      DateTime @default(now())
@@ -384,12 +404,12 @@ model Message {
 
 model AuditLog {
   id             String      @id @default(uuid()) @db.Uuid
-  organizationId String      @db.Uuid   // TENANT BOUNDARY
-  userId         String?     @db.Uuid   // null for system actions
+  organizationId String      @db.Uuid // TENANT BOUNDARY
+  userId         String?     @db.Uuid // null for system actions
   action         AuditAction
-  resourceType   String?     // "document", "folder", "member", etc.
-  resourceId     String?     // ID of the resource affected
-  metadata       Json        @default("{}")  // Before/after state, IPs, etc.
+  resourceType   String? // "document", "folder", "member", etc.
+  resourceId     String? // ID of the resource affected
+  metadata       Json        @default("{}") // Before/after state, IPs, etc.
   ipAddress      String?
   userAgent      String?
   createdAt      DateTime    @default(now())
@@ -400,6 +420,55 @@ model AuditLog {
   @@index([organizationId])
   @@index([organizationId, userId])
   @@index([organizationId, action])
-  @@index([organizationId, createdAt(sort: Desc)])  // Recent activity feed
+  @@index([organizationId, createdAt(sort: Desc)]) // Recent activity feed
   @@map("audit_logs")
+}
+
+// ============================================================
+// AGENT WORKFLOWS
+// Background tasks executed by the AI Agent
+// ============================================================
+
+model Workflow {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid // TENANT BOUNDARY
+  type           String // "document_categorization", "data_extraction", etc.
+  status         WorkflowStatus @default(PENDING)
+  input          Json           @default("{}") // Input parameters
+  output         Json? // Results from the agent
+  error          String? // Error message if failed
+  createdById    String         @db.Uuid
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("CreatedByUser", fields: [createdById], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("workflows")
+}
+
+// ============================================================
+// ORGANIZATION AI CREDENTIALS
+// Per-organization provider API keys, set from the Settings UI.
+// The key is AES-256-GCM encrypted (see @docuflow/ai credentials);
+// only the last 4 characters are ever returned to clients.
+// ============================================================
+
+model OrganizationAiCredential {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid // TENANT BOUNDARY (also the encryption AAD)
+  provider       String // "openai"
+  encryptedKey   String // v1:<iv>:<tag>:<ciphertext>
+  keyLast4       String
+  updatedById    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  updatedBy    User?        @relation("AiCredentialUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, provider])
+  @@map("organization_ai_credentials")
 }

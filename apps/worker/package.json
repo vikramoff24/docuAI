@@ -9,12 +9,13 @@
     "dev:debug": "nest start --debug --watch",
     "start": "node dist/main",
     "typecheck": "tsc --noEmit",
-    "test": "jest --config jest.config.ts --passWithNoTests",
-    "test:unit": "jest --config jest.config.ts --testPathPattern='src/.*.spec.ts' --passWithNoTests"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.ts --passWithNoTests",
+    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.config.ts --testPathPattern='src/.*.spec.ts' --passWithNoTests"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",
     "@docuflow/database": "workspace:*",
+    "@docuflow/ai": "workspace:*",
     "@nestjs/bull": "^10.2.3",
     "@nestjs/common": "^10.4.0",
     "@nestjs/config": "^3.2.0",

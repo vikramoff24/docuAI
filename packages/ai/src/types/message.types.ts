@@ -14,6 +14,20 @@ export interface Message {
   /** Tool call metadata (for tool-use messages) */
   toolCallId?: string;
   toolName?: string;
+  /** Tool calls made by the assistant */
+  toolCalls?: ToolCall[];
+}
+
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, any>; // JSON Schema
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string; // JSON string
 }
 
 export interface CompletionOptions {
@@ -29,6 +43,8 @@ export interface CompletionOptions {
   stop?: string[];
   /** System prompt (prepended to messages if provided) */
   systemPrompt?: string;
+  /** Tools available for the AI to call */
+  tools?: ToolDefinition[];
 }
 
 export interface CompletionResult {
@@ -44,6 +60,8 @@ export interface CompletionResult {
   };
   /** Model used (may differ from requested if fallback) */
   model: string;
+  /** Tool calls if the model chose to call tools */
+  toolCalls?: ToolCall[];
 }
 
 export interface EmbeddingResult {

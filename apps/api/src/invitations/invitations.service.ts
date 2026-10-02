@@ -38,8 +38,8 @@ import { InvitationStatus, OrganizationMemberRole } from '@prisma/client';
 
 import { DatabaseService } from '../database/database.service';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { ROLE_RANK } from '../common/roles';
 
-// Roles that can send invitations
 const CAN_INVITE = new Set<OrganizationMemberRole>([
   OrganizationMemberRole.OWNER,
   OrganizationMemberRole.ADMIN,
@@ -67,10 +67,16 @@ export class InvitationsService {
     }
 
     // Check the invitee isn't already a member
+    // Nobody can grant more power than they hold (so only an OWNER can invite an OWNER)
+    const role = dto.role ?? OrganizationMemberRole.MEMBER;
+    if (ROLE_RANK[role] > ROLE_RANK[inviterRole]) {
+      throw new ForbiddenException(`A ${inviterRole} cannot invite someone as ${role}`);
+    }
+
     const existingMember = await this.db.organizationMember.findFirst({
       where: {
         organizationId,
-        user: { email: dto.email },
+        user: { email: { equals: dto.email, mode: 'insensitive' } },
       },
     });
 
@@ -82,7 +88,7 @@ export class InvitationsService {
     const existingInvite = await this.db.invitation.findFirst({
       where: {
         organizationId,
-        email: dto.email,
+        email: { equals: dto.email, mode: 'insensitive' },
         status: InvitationStatus.PENDING,
         expiresAt: { gt: new Date() }, // Not yet expired
       },
@@ -100,7 +106,7 @@ export class InvitationsService {
       data: {
         organizationId,
         email: dto.email,
-        role: dto.role ?? OrganizationMemberRole.MEMBER,
+        role,
         token,
         status: InvitationStatus.PENDING,
         invitedById,
@@ -119,17 +125,24 @@ export class InvitationsService {
       },
     });
 
-    // TODO Phase 7: Send invitation email via email service
-    // For now, return the token in the response (dev-only, remove in production)
+    await this.db.auditLog.create({
+      data: {
+        organizationId,
+        userId: invitedById,
+        action: 'ORG_MEMBER_INVITED',
+        resourceType: 'invitation',
+        resourceId: invitation.id,
+        metadata: { email: invitation.email, role },
+      },
+    });
     this.logger.log(
       `Invitation sent to ${dto.email} for org ${organizationId} by ${invitedById}`,
     );
 
-    return {
-      ...invitation,
-      // Include token in dev only — production email service would handle delivery
-      invitationToken: process.env['NODE_ENV'] !== 'production' ? token : undefined,
-    };
+    // There is no email delivery yet: the inviting admin shares the link
+    // themselves. The token only works for the invited address, so returning it
+    // to an admin (who could invite anyone anyway) grants nothing extra.
+    return { ...invitation, invitationToken: token };
   }
 
   // ──────────────────────────────────────────────────
@@ -142,14 +155,16 @@ export class InvitationsService {
       throw new ForbiddenException('Only organization admins can view invitations');
     }
 
-    return this.db.invitation.findMany({
+    const invitations = await this.db.invitation.findMany({
       where: { organizationId },
       orderBy: { createdAt: 'desc' },
+      take: 200,
       select: {
         id: true,
         email: true,
         role: true,
         status: true,
+        token: true,
         expiresAt: true,
         createdAt: true,
         invitedBy: {
@@ -157,6 +172,48 @@ export class InvitationsService {
         },
       },
     });
+    const now = new Date();
+    return invitations.map(({ token, ...inv }) => {
+      // Lazily-expired invitations still say PENDING in the database
+      const expired = inv.status === InvitationStatus.PENDING && inv.expiresAt < now;
+      const status = expired ? InvitationStatus.EXPIRED : inv.status;
+      // The link is only useful (and only shown) while it can still be accepted
+      return { ...inv, status, invitationToken: status === InvitationStatus.PENDING ? token : undefined };
+    });
+  }
+
+  // ──────────────────────────────────────────────────
+  // PREVIEW (public — powers the invitation landing page)
+  // ──────────────────────────────────────────────────
+
+  async previewInvitation(token: string) {
+    const invitation = await this.db.invitation.findUnique({
+      where: { token },
+      select: {
+        email: true,
+        role: true,
+        status: true,
+        expiresAt: true,
+        organization: { select: { name: true } },
+        invitedBy: { select: { firstName: true, lastName: true } },
+      },
+    });
+    if (!invitation) throw new NotFoundException('Invitation not found or has expired');
+
+    const expired = invitation.status === InvitationStatus.PENDING && invitation.expiresAt < new Date();
+    const existingAccount = await this.db.user.findFirst({
+      where: { email: { equals: invitation.email, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return {
+      organizationName: invitation.organization.name,
+      email: invitation.email,
+      role: invitation.role,
+      status: expired ? InvitationStatus.EXPIRED : invitation.status,
+      invitedBy: [invitation.invitedBy.firstName, invitation.invitedBy.lastName].filter(Boolean).join(' ') || null,
+      // Lets the page offer "sign in" vs "create account" for this address
+      hasAccount: existingAccount !== null,
+    };
   }
 
   // ──────────────────────────────────────────────────
@@ -194,8 +251,8 @@ export class InvitationsService {
     }
 
     // Find the accepting user's account
-    const user = await this.db.user.findUnique({
-      where: { email: acceptingUserEmail },
+    const user = await this.db.user.findFirst({
+      where: { email: { equals: acceptingUserEmail, mode: 'insensitive' } },
     });
 
     if (!user) {
@@ -222,20 +279,21 @@ export class InvitationsService {
       return { alreadyMember: true, organization: invitation.organization };
     }
 
-    // Accept in a transaction: create membership + update invitation status
-    await this.db.$transaction([
-      this.db.organizationMember.create({
+    // Accept in a transaction: claim the invitation (once) + create membership
+    await this.db.$transaction(async (tx) => {
+      const { count } = await tx.invitation.updateMany({
+        where: { id: invitation.id, status: InvitationStatus.PENDING },
+        data: { status: InvitationStatus.ACCEPTED },
+      });
+      if (count === 0) throw new ConflictException('Invitation is no longer pending');
+      await tx.organizationMember.create({
         data: {
           userId: user.id,
           organizationId: invitation.organizationId,
           role: invitation.role,
         },
-      }),
-      this.db.invitation.update({
-        where: { id: invitation.id },
-        data: { status: InvitationStatus.ACCEPTED },
-      }),
-    ]);
+      });
+    });
 
     this.logger.log(
       `Invitation accepted: ${acceptingUserEmail} joined org ${invitation.organizationId} as ${invitation.role}`,

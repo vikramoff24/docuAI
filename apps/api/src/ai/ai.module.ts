@@ -28,7 +28,9 @@ import { OpenAIProvider } from '@docuflow/ai';
 import type { AIProvider } from '@docuflow/ai';
 import { RAGService } from './rag.service';
 import { AIController } from './ai.controller';
-import { AI_PROVIDER_TOKEN } from './ai.constants';
+import { AI_PROVIDER_FACTORY_TOKEN, AI_PROVIDER_TOKEN, OPENAI_KEY_VERIFIER_TOKEN } from './ai.constants';
+import { AiCredentialsService, verifyOpenAIKeyOnline, type AiProviderFactory } from './ai-credentials.service';
+import { AiSettingsController } from './ai-settings.controller';
 
 @Global() // AI provider is available everywhere without re-importing this module
 @Module({
@@ -47,9 +49,15 @@ import { AI_PROVIDER_TOKEN } from './ai.constants';
         }
       },
     },
+    {
+      provide: AI_PROVIDER_FACTORY_TOKEN,
+      useValue: ((apiKey: string) => new OpenAIProvider(apiKey)) satisfies AiProviderFactory,
+    },
+    { provide: OPENAI_KEY_VERIFIER_TOKEN, useValue: verifyOpenAIKeyOnline },
+    AiCredentialsService,
     RAGService,
   ],
-  controllers: [AIController],
-  exports: [AI_PROVIDER_TOKEN, RAGService],
+  controllers: [AIController, AiSettingsController],
+  exports: [AI_PROVIDER_TOKEN, AiCredentialsService, RAGService],
 })
 export class AIModule {}

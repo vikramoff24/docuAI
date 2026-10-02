@@ -43,6 +43,9 @@ const configSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_DEFAULT_PROVIDER: z.enum(['openai', 'anthropic', 'google']).default('openai'),
+  // Encrypts organization API keys set in Settings (32 bytes, base64 or hex).
+  // Must be identical for the API and the worker. Generate: openssl rand -base64 32
+  AI_CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
 
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
@@ -69,6 +72,13 @@ export function validateConfig(config: Record<string, unknown>): AppConfig {
     }
     if (!result.data.JWT_REFRESH_SECRET) {
       console.warn('⚠️  JWT_REFRESH_SECRET not set. Using insecure default for development only!');
+    }
+    if (!result.data.AI_CREDENTIALS_ENCRYPTION_KEY) {
+      console.warn(
+        result.data.NODE_ENV === 'production'
+          ? '⚠️  AI_CREDENTIALS_ENCRYPTION_KEY not set. Organizations cannot store API keys in Settings.'
+          : '⚠️  AI_CREDENTIALS_ENCRYPTION_KEY not set. Using an insecure development key for stored API keys!',
+      );
     }
   }
 

@@ -33,11 +33,12 @@
  * We parse these references to build structured citation objects.
  */
 
-import { Injectable, Inject, Logger } from '@nestjs/common';
-import type { AIProvider, Message } from '@docuflow/ai';
+import { ConflictException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { Message } from '@docuflow/ai';
 
 import { DatabaseService } from '../database/database.service';
-import { AI_PROVIDER_TOKEN } from './ai.constants';
+import { AiCredentialsService } from './ai-credentials.service';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,15 +102,17 @@ export class RAGService {
   private readonly logger = new Logger(RAGService.name);
 
   constructor(
-    @Inject(AI_PROVIDER_TOKEN) private readonly ai: AIProvider,
+    private readonly credentials: AiCredentialsService,
     private readonly db: DatabaseService,
   ) {}
 
   /**
-   * Check if AI provider is available.
+   * Check if an AI provider is configured for the organization
+   * (its own key from Settings, or the server-wide OPENAI_API_KEY).
    */
-  isAvailable(): boolean {
-    return this.ai.isAvailable();
+  async isAvailable(organizationId: string): Promise<boolean> {
+    const ai = await this.credentials.providerFor(organizationId);
+    return ai?.isAvailable() ?? false;
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -136,29 +139,29 @@ export class RAGService {
       documentIds,
     } = options;
 
-    if (!this.ai.isAvailable()) {
+    const ai = await this.credentials.providerFor(organizationId);
+    if (!ai?.isAvailable()) {
       this.logger.warn('AI provider unavailable — cannot retrieve semantic context');
       return [];
     }
 
     // Embed the query
-    const embedResults = await this.ai.embed([query]);
+    const embedResults = await ai.embed([query]);
     if (!embedResults[0]) {
       this.logger.warn('Embedding generation returned no results');
       return [];
     }
 
     const queryEmbedding = embedResults[0].embedding;
-    const embeddingLiteral = `[${queryEmbedding.join(',')}]`;
+    const embedding = `[${queryEmbedding.join(',')}]`;
 
-    // Build document filter
+    // Bound parameters only — documentIds come from the request body.
     const docFilter =
       documentIds && documentIds.length > 0
-        ? `AND c."documentId" IN (${documentIds.map((id) => `'${id}'`).join(',')})`
-        : '';
+        ? Prisma.sql`AND c."documentId" = ANY(${documentIds}::uuid[])`
+        : Prisma.empty;
 
-    // Vector similarity search
-    const rows = await this.db.$queryRawUnsafe<
+    const rows = await this.db.$queryRaw<
       Array<{
         chunkId: string;
         documentId: string;
@@ -167,26 +170,26 @@ export class RAGService {
         chunkIndex: number;
         similarity: number;
       }>
-    >(`
+    >`
       SELECT
         c."id" AS "chunkId",
         c."documentId",
         d."name" AS "documentName",
         c."content",
         c."chunkIndex",
-        1 - (c."embedding" <=> '${embeddingLiteral}'::vector) AS similarity
+        1 - (c."embedding" <=> ${embedding}::vector) AS similarity
       FROM "document_chunks" c
       JOIN "documents" d ON c."documentId" = d."id"
       WHERE
-        c."organizationId" = '${organizationId}'
+        c."organizationId" = ${organizationId}::uuid
         AND c."embedding" IS NOT NULL
         AND d."deletedAt" IS NULL
         AND d."status" = 'READY'
-        AND 1 - (c."embedding" <=> '${embeddingLiteral}'::vector) >= ${minSimilarity}
+        AND 1 - (c."embedding" <=> ${embedding}::vector) >= ${minSimilarity}
         ${docFilter}
-      ORDER BY c."embedding" <=> '${embeddingLiteral}'::vector ASC
+      ORDER BY c."embedding" <=> ${embedding}::vector ASC
       LIMIT ${topK}
-    `);
+    `;
 
     this.logger.debug(
       `Retrieved ${rows.length} chunks for query: "${query.slice(0, 50)}..."`,
@@ -211,13 +214,15 @@ export class RAGService {
    * Non-streaming version — waits for complete response.
    */
   async generateAnswer(
+    organizationId: string,
     question: string,
     chunks: RetrievedChunk[],
     conversationHistory: Message[] = [],
   ): Promise<RAGAnswer> {
+    const ai = await this.credentials.requireProvider(organizationId);
     const messages = this.buildRAGMessages(question, chunks, conversationHistory);
 
-    const result = await this.ai.complete(messages, {
+    const result = await ai.complete(messages, {
       systemPrompt: RAG_SYSTEM_PROMPT,
       maxTokens: 2048,
       temperature: 0.3,
@@ -247,6 +252,7 @@ export class RAGService {
    * Yields RAGStreamChunks for SSE transport.
    */
   async *generateAnswerStream(
+    organizationId: string,
     question: string,
     chunks: RetrievedChunk[],
     conversationHistory: Message[] = [],
@@ -254,7 +260,8 @@ export class RAGService {
     const messages = this.buildRAGMessages(question, chunks, conversationHistory);
 
     try {
-      for await (const chunk of this.ai.stream(messages, {
+      const ai = await this.credentials.requireProvider(organizationId);
+      for await (const chunk of ai.stream(messages, {
         systemPrompt: RAG_SYSTEM_PROMPT,
         maxTokens: 2048,
         temperature: 0.3,
@@ -276,9 +283,14 @@ export class RAGService {
       }
     } catch (err) {
       this.logger.error(`Stream generation failed: ${err}`);
+      // Provider errors can echo request details (e.g. a masked API key): only
+      // pass through our own user-facing messages.
       yield {
         type: 'error',
-        error: err instanceof Error ? err.message : 'Stream failed',
+        error:
+          err instanceof HttpException
+            ? err.message
+            : 'The AI provider failed to answer. Please try again.',
       };
     }
   }
@@ -295,6 +307,22 @@ export class RAGService {
     documentId: string,
     organizationId: string,
   ): Promise<{ summary: string; keyPoints: string[]; wordCount: number }> {
+    const document = await this.db.document.findFirst({
+      where: { id: documentId, organizationId, deletedAt: null },
+      select: { name: true, mimeType: true, status: true },
+    });
+    if (!document) {
+      throw new NotFoundException('Document not found');
+    }
+    if (document.status !== 'READY') {
+      throw new ConflictException(
+        document.status === 'FAILED'
+          ? 'This document could not be processed, so it cannot be summarized'
+          : 'This document is still being processed — try again shortly',
+      );
+    }
+    const ai = await this.credentials.requireProvider(organizationId);
+
     // Fetch document chunks (no embedding needed — full text)
     const chunks = await this.db.documentChunk.findMany({
       where: { documentId, organizationId },
@@ -303,12 +331,7 @@ export class RAGService {
       select: { content: true, chunkIndex: true },
     });
 
-    const document = await this.db.document.findFirst({
-      where: { id: documentId, organizationId },
-      select: { name: true, mimeType: true },
-    });
-
-    if (!document || chunks.length === 0) {
+    if (chunks.length === 0) {
       return {
         summary: 'No content available to summarize.',
         keyPoints: [],
@@ -334,7 +357,7 @@ Format your response as JSON:
       },
     ];
 
-    const result = await this.ai.complete(messages, {
+    const result = await ai.complete(messages, {
       systemPrompt: 'You are a document summarization assistant. Respond with valid JSON only.',
       maxTokens: 1024,
       temperature: 0.2,

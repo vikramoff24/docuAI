@@ -44,6 +44,7 @@ import {
   Injectable,
   UnauthorizedException,
   ConflictException,
+  ForbiddenException,
   Logger,
   NotFoundException,
   Inject,
@@ -52,7 +53,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
-import { OrganizationMemberRole } from '@prisma/client';
+import { InvitationStatus, OrganizationMemberRole, Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 
 import { DatabaseService } from '../database/database.service';
@@ -74,6 +75,16 @@ export interface AuthTokens {
   expiresIn: number;     // seconds
 }
 
+/** The organization a session acts in, as returned to clients. */
+export interface SessionOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  role: OrganizationMemberRole;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -91,7 +102,11 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     // Check for existing user
-    const existing = await this.db.user.findUnique({ where: { email: dto.email } });
+    // Case-insensitive: rows created before emails were normalized may be mixed-case
+    const existing = await this.db.user.findFirst({
+      where: { email: { equals: dto.email, mode: 'insensitive' } },
+      select: { id: true },
+    });
     if (existing) {
       // WHY ConflictException and not "User already exists"?
       // Never confirm whether an email exists (user enumeration attack).
@@ -103,6 +118,15 @@ export class AuthService {
     // Hash password
     const saltRounds = this.config.get<number>('bcryptSaltRounds', 10);
     const passwordHash = await bcrypt.hash(dto.password, saltRounds);
+
+    if (dto.invitationToken) {
+      return this.registerWithInvitation(dto, dto.invitationToken, passwordHash);
+    }
+    if (!dto.organizationName) {
+      // Guarded by the DTO; kept so the type narrows
+      throw new ConflictException('Organization name is required');
+    }
+    const organizationName = dto.organizationName;
 
     // Create user in a transaction with organization + membership
     // WHY A TRANSACTION?
@@ -121,35 +145,7 @@ export class AuthService {
         select: { id: true, email: true, firstName: true, lastName: true },
       });
 
-      // Create the user's first organization
-      const orgSlug = this.generateSlug(dto.organizationName);
-      const org = await tx.organization.create({
-        data: {
-          name: dto.organizationName,
-          slug: orgSlug,
-        },
-        select: { id: true, name: true, slug: true },
-      });
-
-      // Make this user the OWNER of the organization
-      await tx.organizationMember.create({
-        data: {
-          userId: user.id,
-          organizationId: org.id,
-          role: OrganizationMemberRole.OWNER,
-        },
-      });
-
-      // Create root folder for the organization
-      await tx.folder.create({
-        data: {
-          organizationId: org.id,
-          name: 'Root',
-          path: '/',
-          createdById: user.id,
-        },
-      });
-
+      const org = await this.createOwnedOrganization(tx, user.id, organizationName);
       return { user, org };
     });
 
@@ -161,20 +157,109 @@ export class AuthService {
     };
   }
 
+  /**
+   * Sign up through an invitation link: the account joins the inviting
+   * organization directly (no personal organization is created). Holding the
+   * token proves the invitee received the link sent to this address.
+   */
+  private async registerWithInvitation(dto: RegisterDto, token: string, passwordHash: string) {
+    const invitation = await this.db.invitation.findUnique({
+      where: { token },
+      include: { organization: { select: { id: true, name: true, slug: true } } },
+    });
+    if (!invitation || invitation.status !== InvitationStatus.PENDING || invitation.expiresAt < new Date()) {
+      throw new NotFoundException('This invitation is invalid or has expired');
+    }
+    if (invitation.email.toLowerCase() !== dto.email.toLowerCase()) {
+      throw new ForbiddenException(`This invitation was sent to ${invitation.email}. Sign up with that address.`);
+    }
+
+    const user = await this.db.$transaction(async (tx) => {
+      // Claim the invitation first: two signups racing on one link can't both join
+      const { count } = await tx.invitation.updateMany({
+        where: { id: invitation.id, status: InvitationStatus.PENDING },
+        data: { status: InvitationStatus.ACCEPTED },
+      });
+      if (count === 0) throw new ConflictException('This invitation has already been used');
+
+      const created = await tx.user.create({
+        data: {
+          email: dto.email,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true, email: true, firstName: true, lastName: true },
+      });
+      await tx.organizationMember.create({
+        data: { userId: created.id, organizationId: invitation.organizationId, role: invitation.role },
+      });
+      return created;
+    });
+
+    this.logger.log(`User registered via invitation: ${user.email} (org: ${invitation.organization.slug})`);
+    return { user, organization: invitation.organization };
+  }
+
+  /** New organization with `userId` as OWNER, plus its root folder. */
+  private async createOwnedOrganization(tx: Prisma.TransactionClient, userId: string, name: string) {
+    const org = await tx.organization.create({
+      data: { name, slug: this.generateSlug(name) },
+      select: { id: true, name: true, slug: true },
+    });
+    await tx.organizationMember.create({
+      data: { userId, organizationId: org.id, role: OrganizationMemberRole.OWNER },
+    });
+    await tx.folder.create({
+      data: { organizationId: org.id, name: 'Root', path: '/', createdById: userId },
+    });
+    return org;
+  }
+
+  // ──────────────────────────────────────────────────
+  // ORGANIZATIONS OF A USER
+  // ──────────────────────────────────────────────────
+
+  /**
+   * The membership a session should act in: `preferredOrgId` if the user still
+   * belongs to it, otherwise their oldest membership (null if they have none).
+   */
+  private async resolveMembership(userId: string, preferredOrgId?: string | null) {
+    if (preferredOrgId) {
+      const preferred = await this.db.organizationMember.findUnique({
+        where: { userId_organizationId: { userId, organizationId: preferredOrgId } },
+        include: { organization: { select: { id: true, name: true, slug: true } } },
+      });
+      if (preferred) return preferred;
+    }
+    return this.db.organizationMember.findFirst({
+      where: { userId },
+      orderBy: { joinedAt: 'asc' },
+      include: { organization: { select: { id: true, name: true, slug: true } } },
+    });
+  }
+
+  async listOrganizations(userId: string, currentOrganizationId: string) {
+    const memberships = await this.db.organizationMember.findMany({
+      where: { userId },
+      orderBy: { joinedAt: 'asc' },
+      include: { organization: { select: { id: true, name: true, slug: true } } },
+    });
+    return memberships.map((m) => ({
+      ...m.organization,
+      role: m.role,
+      current: m.organizationId === currentOrganizationId,
+    }));
+  }
+
   // ──────────────────────────────────────────────────
   // VALIDATE USER (used by LocalStrategy)
   // ──────────────────────────────────────────────────
 
   async validateUser(email: string, password: string) {
-    const user = await this.db.user.findUnique({
-      where: { email },
-      include: {
-        memberships: {
-          include: { organization: true },
-          take: 1,
-          orderBy: { joinedAt: 'asc' },
-        },
-      },
+    const user = await this.db.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
     });
 
     if (!user) {
@@ -201,10 +286,22 @@ export class AuthService {
   async login(dto: LoginDto, ipAddress?: string, userAgent?: string) {
     const user = await this.validateUser(dto.email, dto.password);
 
-    // Get the active organization (first one, or specified one)
-    const membership = user.memberships[0];
+    // Resume in the organization the user last worked in (falls back to the oldest)
+    const lastSession = await this.db.refreshToken.findFirst({
+      where: { userId: user.id, organizationId: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { organizationId: true },
+    });
+    let membership = await this.resolveMembership(user.id, lastSession?.organizationId);
     if (!membership) {
-      throw new NotFoundException('User has no organization membership');
+      // Removed from (or left) every organization, e.g. someone who only ever
+      // joined through an invitation. Give them a fresh workspace rather than
+      // locking them out of their account.
+      const name = `${user.firstName ?? user.email.split('@')[0]}'s workspace`.slice(0, 100);
+      await this.db.$transaction((tx) => this.createOwnedOrganization(tx, user.id, name));
+      this.logger.log(`Created a personal workspace for ${user.email} (no memberships left)`);
+      membership = await this.resolveMembership(user.id);
+      if (!membership) throw new NotFoundException('User has no organization membership');
     }
 
     const tokens = await this.generateTokens(
@@ -225,12 +322,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
       },
-      organization: {
-        id: membership.organization.id,
-        name: membership.organization.name,
-        slug: membership.organization.slug,
-        role: membership.role,
-      },
+      organization: { ...membership.organization, role: membership.role } satisfies SessionOrganization,
       tokens,
     };
   }
@@ -262,20 +354,26 @@ export class AuthService {
     // 1. Revocation: can invalidate all tokens for a user (account compromise)
     // 2. Rotation: detect replay attacks (family-based rotation)
     // 3. Audit: see all active sessions
-    const rawRefreshToken = uuidv4(); // Random UUID — not a JWT
-    const tokenHash = await bcrypt.hash(rawRefreshToken, 10);
+    // Format: "<tokenId>.<secret>". The id lets refresh look up the row directly;
+    // only the secret is hashed, so a leaked DB row can't be replayed.
+    const tokenId = uuidv4();
+    const secret = uuidv4();
+    const rawRefreshToken = `${tokenId}.${secret}`;
+    const tokenHash = await bcrypt.hash(secret, 10);
     const family = uuidv4(); // Token family for rotation attack detection
     const refreshExpiresIn = this.config.get<string>('jwt.refreshExpiresIn', '7d');
     const expiresAt = this.parseExpiresIn(refreshExpiresIn);
 
     await this.db.refreshToken.create({
       data: {
+        id: tokenId,
         userId,
         tokenHash,
         family,
         expiresAt,
         ipAddress,
         userAgent,
+        organizationId,
       },
     });
 
@@ -290,54 +388,59 @@ export class AuthService {
   // REFRESH TOKEN
   // ──────────────────────────────────────────────────
 
-  async refreshTokens(rawRefreshToken: string, ipAddress?: string, userAgent?: string) {
-    // Find all non-revoked, non-expired refresh tokens
-    // We need to check against all stored tokens (can't query by hash directly)
-    // In production, you'd store a token ID in the cookie and query by ID
-    // For simplicity here, we query recent tokens for the IP and do hash comparison
-
-    // More efficient approach: store token ID in the cookie payload
-    // Here we find candidates by user agent (simplified for Phase 1)
-    const recentTokens = await this.db.refreshToken.findMany({
-      where: {
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      include: { user: true },
-      take: 100, // Safety limit
-    });
-
-    let validToken = null;
-    for (const token of recentTokens) {
-      const isValid = await bcrypt.compare(rawRefreshToken, token.tokenHash);
-      if (isValid) {
-        validToken = token;
-        break;
-      }
-    }
-
-    if (!validToken) {
+  /**
+   * Rotates a refresh token. With `switchToOrganizationId` the new session acts
+   * in that organization (the user must be a member); otherwise it stays in the
+   * token's organization, or falls back to the oldest membership if the user
+   * was removed from it.
+   */
+  async refreshTokens(
+    rawRefreshToken: string,
+    ipAddress?: string,
+    userAgent?: string,
+    switchToOrganizationId?: string,
+  ): Promise<AuthTokens & { organization: SessionOrganization }> {
+    const [tokenId, secret] = rawRefreshToken.split('.');
+    if (!tokenId || !secret || !UUID_RE.test(tokenId)) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // Rotate: revoke old token
-    await this.db.refreshToken.update({
-      where: { id: validToken.id },
-      data: { revokedAt: new Date() },
+    const validToken = await this.db.refreshToken.findFirst({
+      where: { id: tokenId, revokedAt: null, expiresAt: { gt: new Date() } },
+      include: { user: true },
     });
 
-    // Get user's current organization membership
-    const membership = await this.db.organizationMember.findFirst({
-      where: { userId: validToken.userId },
-      orderBy: { joinedAt: 'asc' },
-    });
+    if (!validToken || !(await bcrypt.compare(secret, validToken.tokenHash))) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
 
+    // Checked before rotating, so a bad switch request leaves the session intact
+    let membership;
+    if (switchToOrganizationId) {
+      membership = await this.resolveMembership(validToken.userId, switchToOrganizationId);
+      if (membership?.organizationId !== switchToOrganizationId) {
+        throw new ForbiddenException('You are not a member of that organization');
+      }
+    } else {
+      membership = await this.resolveMembership(validToken.userId, validToken.organizationId);
+    }
     if (!membership) {
       throw new UnauthorizedException('User has no organization');
     }
 
+    // Rotate: revoke old token
+    // Revoke atomically: of two concurrent refreshes with the same token, only
+    // one may win, otherwise a single-use token would mint two sessions.
+    const { count } = await this.db.refreshToken.updateMany({
+      where: { id: validToken.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (count === 0) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
     // Issue new token pair
-    return this.generateTokens(
+    const tokens = await this.generateTokens(
       validToken.userId,
       validToken.user.email,
       membership.organizationId,
@@ -345,6 +448,7 @@ export class AuthService {
       ipAddress,
       userAgent,
     );
+    return { ...tokens, organization: { ...membership.organization, role: membership.role } };
   }
 
   // ──────────────────────────────────────────────────

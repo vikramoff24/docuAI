@@ -1,6 +1,8 @@
 import { IsString, IsOptional, IsArray, IsUUID, MaxLength, IsNotEmpty } from 'class-validator';
+import { Trim } from '../../common/transforms/string.transforms';
 
 export class CreateConversationDto {
+  @Trim()
   @IsString()
   @IsOptional()
   @MaxLength(255)

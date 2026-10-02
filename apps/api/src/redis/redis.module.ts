@@ -32,7 +32,7 @@
  * in NestJS (database connections, HTTP clients, etc.)
  */
 
-import { Global, Module, Provider } from '@nestjs/common';
+import { Global, Inject, Module, OnApplicationShutdown, Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
@@ -71,4 +71,11 @@ const redisProvider: Provider = {
   providers: [redisProvider],
   exports: [REDIS_CLIENT],
 })
-export class RedisModule {}
+export class RedisModule implements OnApplicationShutdown {
+  constructor(@Inject(REDIS_CLIENT) private readonly client: Redis) {}
+
+  /** Close the connection on app.close(), or it keeps the process (and jest) alive. */
+  async onApplicationShutdown() {
+    await this.client.quit().catch(() => this.client.disconnect());
+  }
+}

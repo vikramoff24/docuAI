@@ -4,7 +4,7 @@
  * Full pipeline:
  *   1. extractText()   — Download from S3, parse based on MIME type
  *   2. chunkText()     — Split into overlapping 1000-char chunks
- *   3. generateEmbeddings() — Call OpenAI text-embedding-3-small (if API key set)
+ *   3. generateEmbeddings() — Call OpenAI text-embedding-3-small (org key from Settings, else OPENAI_API_KEY)
  *   4. storeChunks()   — Bulk-insert DocumentChunk records + update doc status to READY
  *
  * WHY NOT USE LANGCHAIN?
@@ -25,6 +25,7 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { DocumentStatus } from '@prisma/client';
+import { WorkerAiCredentialsService } from '../ai/worker-ai-credentials.service';
 import { WorkerDatabaseService } from '../database/worker-database.service';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -51,16 +52,34 @@ const EMBEDDING_DIMENSIONS = 1536;  // text-embedding-3-small dimensions
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
+/**
+ * The file itself can't be turned into text (corrupt, encrypted, scanned image…).
+ * Retrying won't help, so the consumer fails the document immediately.
+ */
+export class ExtractionError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, { cause });
+    this.name = 'ExtractionError';
+  }
+}
+
+function requireText(text: string, fileName: string): string {
+  if (!text.trim()) {
+    throw new ExtractionError(`No text found in "${fileName}" — scanned or image-only files are not supported yet`);
+  }
+  return text;
+}
+
 @Injectable()
 export class DocumentProcessingService {
   private readonly logger = new Logger(DocumentProcessingService.name);
   private readonly s3: S3Client;
   private readonly bucket: string;
-  private readonly openaiApiKey: string | undefined;
 
   constructor(
     private readonly db: WorkerDatabaseService,
     config: ConfigService,
+    private readonly credentials: WorkerAiCredentialsService,
   ) {
     const endpoint = config.get<string>('STORAGE_ENDPOINT', 'http://localhost:4566');
     const region = config.get<string>('STORAGE_REGION', 'us-east-1');
@@ -68,20 +87,12 @@ export class DocumentProcessingService {
     const secretAccessKey = config.get<string>('STORAGE_SECRET_ACCESS_KEY', 'test');
 
     this.bucket = config.get<string>('STORAGE_BUCKET', 'docuflow-dev');
-    this.openaiApiKey = config.get<string>('OPENAI_API_KEY');
 
     this.s3 = new S3Client({
       region,
       credentials: { accessKeyId, secretAccessKey },
       ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
     });
-
-    if (!this.openaiApiKey) {
-      this.logger.warn(
-        'OPENAI_API_KEY not set — embeddings will be skipped. ' +
-        'Set OPENAI_API_KEY to enable semantic search.',
-      );
-    }
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -89,6 +100,12 @@ export class DocumentProcessingService {
   // ──────────────────────────────────────────────────────────────────────────
 
   async extractText(s3Key: string, mimeType: string, fileName: string): Promise<string> {
+    // Postgres text columns reject NUL bytes, which PDFs and mislabeled
+    // binaries regularly contain — one would fail the whole document.
+    return (await this.extractRawText(s3Key, mimeType, fileName)).replace(/\u0000/g, '');
+  }
+
+  private async extractRawText(s3Key: string, mimeType: string, fileName: string): Promise<string> {
     this.logger.debug(`Extracting text from: ${fileName} (${mimeType})`);
 
     // Download file from S3
@@ -136,29 +153,32 @@ export class DocumentProcessingService {
   }
 
   private async extractPdfText(buffer: Buffer, fileName: string): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { PDFParse } = require('pdf-parse') as typeof import('pdf-parse');
+    const parser = new PDFParse({ data: buffer });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse');
-      const data = await pdfParse(buffer);
-      this.logger.debug(`PDF: ${data.numpages} pages, ${data.text.length} chars from ${fileName}`);
-      return data.text;
+      const result = await parser.getText({ pageJoiner: '' });
+      this.logger.debug(`PDF: ${result.total} pages, ${result.text.length} chars from ${fileName}`);
+      return requireText(result.text, fileName);
     } catch (err) {
-      this.logger.error(`PDF extraction failed for ${fileName}: ${err}`);
-      return `[PDF extraction failed: ${fileName}]`;
+      if (err instanceof ExtractionError) throw err;
+      throw new ExtractionError(`Could not read PDF "${fileName}" — the file may be corrupt or password-protected`, err);
+    } finally {
+      await parser.destroy().catch(() => undefined);
     }
   }
 
   private async extractDocxText(buffer: Buffer, fileName: string): Promise<string> {
+    let value: string;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const mammoth = require('mammoth');
-      const result = await mammoth.extractRawText({ buffer });
-      this.logger.debug(`DOCX: ${result.value.length} chars from ${fileName}`);
-      return result.value;
+      ({ value } = await mammoth.extractRawText({ buffer }));
     } catch (err) {
-      this.logger.error(`DOCX extraction failed for ${fileName}: ${err}`);
-      return `[DOCX extraction failed: ${fileName}]`;
+      throw new ExtractionError(`Could not read Word document "${fileName}" — the file may be corrupt`, err);
     }
+    this.logger.debug(`DOCX: ${value.length} chars from ${fileName}`);
+    return requireText(value, fileName);
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -211,10 +231,16 @@ export class DocumentProcessingService {
   // STAGE 3: Generate embeddings via OpenAI
   // ──────────────────────────────────────────────────────────────────────────
 
-  async generateEmbeddings(chunks: TextChunk[], documentId: string): Promise<ChunkWithEmbedding[]> {
-    if (!this.openaiApiKey || chunks.length === 0) {
+  async generateEmbeddings(
+    chunks: TextChunk[],
+    documentId: string,
+    organizationId: string,
+  ): Promise<ChunkWithEmbedding[]> {
+    // The org's own key (Settings) takes precedence over OPENAI_API_KEY.
+    const resolved = chunks.length > 0 ? await this.credentials.resolveOpenAIKey(organizationId) : null;
+    if (!resolved) {
       this.logger.warn(
-        `Skipping embeddings for ${documentId}: ${!this.openaiApiKey ? 'no API key' : 'no chunks'}`,
+        `Skipping embeddings for ${documentId}: ${chunks.length === 0 ? 'no chunks' : 'no OpenAI key configured'}`,
       );
       return chunks.map((c) => ({ ...c, embedding: null }));
     }
@@ -228,7 +254,7 @@ export class DocumentProcessingService {
     // Process in batches to respect rate limits
     for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
       const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
-      const embeddings = await this.callOpenAIEmbeddings(batch.map((c) => c.content));
+      const embeddings = await this.callOpenAIEmbeddings(batch.map((c) => c.content), resolved.apiKey);
 
       for (let j = 0; j < batch.length; j++) {
         results.push({
@@ -245,11 +271,11 @@ export class DocumentProcessingService {
     return results;
   }
 
-  private async callOpenAIEmbeddings(texts: string[]): Promise<number[][]> {
+  private async callOpenAIEmbeddings(texts: string[], apiKey: string): Promise<number[][]> {
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${this.openaiApiKey}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -272,6 +298,18 @@ export class DocumentProcessingService {
     return data.data
       .sort((a, b) => a.index - b.index)
       .map((d) => d.embedding);
+  }
+
+  /**
+   * False when the document was hard- or soft-deleted after the job was queued.
+   * Processing it would waste work (and embedding spend) or hit an FK violation.
+   */
+  async isDocumentProcessable(documentId: string): Promise<boolean> {
+    const doc = await this.db.document.findUnique({
+      where: { id: documentId },
+      select: { deletedAt: true },
+    });
+    return doc !== null && doc.deletedAt === null;
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -354,12 +392,11 @@ export class DocumentProcessingService {
         if (!chunk.embedding) continue;
         const vectorLiteral = `[${chunk.embedding.join(',')}]`;
         try {
-          await this.db.$executeRawUnsafe(
-            `UPDATE "document_chunks"
-             SET "embedding" = '${vectorLiteral}'::vector
-             WHERE "documentId" = '${documentId}'
-               AND "chunkIndex" = ${chunk.chunkIndex}`,
-          );
+          await this.db.$executeRaw`
+            UPDATE "document_chunks"
+            SET "embedding" = ${vectorLiteral}::vector
+            WHERE "documentId" = ${documentId}::uuid
+              AND "chunkIndex" = ${chunk.chunkIndex}`;
         } catch (err) {
           // Log but don't fail — chunk is stored, just without embedding
           this.logger.warn(

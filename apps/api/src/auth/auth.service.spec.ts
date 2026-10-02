@@ -33,6 +33,8 @@ import { ConfigService } from '@nestjs/config';
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { OrganizationMemberRole } from '@prisma/client';
 
+import * as bcrypt from 'bcrypt';
+
 import { AuthService } from './auth.service';
 import { DatabaseService } from '../database/database.service';
 import { REDIS_CLIENT } from '../redis/redis.module';
@@ -64,7 +66,7 @@ const mockUser = {
 // ────────────────────────────────────────────────
 const mockDb = {
   user: {
-    findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
   },
   organization: {
@@ -81,6 +83,7 @@ const mockDb = {
   refreshToken: {
     create: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
   },
@@ -136,7 +139,7 @@ describe('AuthService', () => {
 
   describe('register', () => {
     it('should throw ConflictException if email already exists', async () => {
-      mockDb.user.findUnique.mockResolvedValue(mockUser);
+      mockDb.user.findFirst.mockResolvedValue(mockUser);
 
       await expect(
         service.register({
@@ -148,11 +151,13 @@ describe('AuthService', () => {
         }),
       ).rejects.toThrow(ConflictException);
 
-      expect(mockDb.user.findUnique).toHaveBeenCalledWith({ where: { email: 'alice@acme.com' } });
+      expect(mockDb.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { email: { equals: 'alice@acme.com', mode: 'insensitive' } } }),
+      );
     });
 
     it('should create user, organization, and membership in a transaction', async () => {
-      mockDb.user.findUnique.mockResolvedValue(null);
+      mockDb.user.findFirst.mockResolvedValue(null);
 
       const createdUser = { id: 'new-user-id', email: 'new@acme.com', firstName: 'New', lastName: 'User' };
       const createdOrg = { id: 'new-org-id', name: 'New Org', slug: 'new-org-abc1' };
@@ -187,7 +192,7 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should throw UnauthorizedException for non-existent user', async () => {
-      mockDb.user.findUnique.mockResolvedValue(null);
+      mockDb.user.findFirst.mockResolvedValue(null);
 
       await expect(
         service.validateUser('nonexistent@test.com', 'Password123!'),
@@ -200,7 +205,7 @@ describe('AuthService', () => {
         ...mockUser,
         passwordHash: '$2b$10$wronghashhere.invalidhashfortesting',
       };
-      mockDb.user.findUnique.mockResolvedValue(wrongPasswordUser);
+      mockDb.user.findFirst.mockResolvedValue(wrongPasswordUser);
 
       await expect(
         service.validateUser('alice@acme.com', 'WrongPassword123!'),
@@ -214,7 +219,7 @@ describe('AuthService', () => {
 
   describe('security properties', () => {
     it('should NOT reveal whether email exists via error message', async () => {
-      mockDb.user.findUnique.mockResolvedValue(null);
+      mockDb.user.findFirst.mockResolvedValue(null);
 
       let error: UnauthorizedException | null = null;
       try {
@@ -247,6 +252,91 @@ describe('AuthService', () => {
           jti: expect.any(String), // UUID, unique per token
         }),
       );
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  // Refresh Token Tests
+  // ──────────────────────────────────────────────
+
+  describe('refreshTokens', () => {
+    const TOKEN_ID = '11111111-1111-4111-8111-111111111111';
+
+    it('should issue refresh tokens as "<id>.<secret>" and store the id', async () => {
+      mockDb.refreshToken.create.mockResolvedValue({});
+
+      const tokens = await service.generateTokens('user-id', 'a@b.com', 'org-id', OrganizationMemberRole.MEMBER);
+
+      const [id, secret] = tokens.refreshToken.split('.');
+      expect(secret).toBeTruthy();
+      expect(mockDb.refreshToken.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ id }),
+      });
+      // Only the secret half is hashed
+      const { tokenHash } = mockDb.refreshToken.create.mock.calls[0][0].data;
+      expect(await bcrypt.compare(secret, tokenHash)).toBe(true);
+    });
+
+    it('should reject malformed tokens without querying the database', async () => {
+      await expect(service.refreshTokens('not-a-token')).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshTokens('abc.def')).rejects.toThrow(UnauthorizedException);
+      expect(mockDb.refreshToken.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('should reject a token whose secret does not match', async () => {
+      mockDb.refreshToken.findFirst.mockResolvedValue({
+        id: TOKEN_ID,
+        userId: 'user-id',
+        tokenHash: await bcrypt.hash('real-secret', 4),
+        user: mockUser,
+      });
+
+      await expect(service.refreshTokens(`${TOKEN_ID}.wrong-secret`)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockDb.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('should look up by id, revoke the old token and issue a new pair', async () => {
+      mockDb.refreshToken.findFirst.mockResolvedValue({
+        id: TOKEN_ID,
+        userId: 'user-id',
+        tokenHash: await bcrypt.hash('real-secret', 4),
+        user: mockUser,
+      });
+      mockDb.organizationMember.findFirst.mockResolvedValue({
+        organizationId: 'org-id',
+        role: OrganizationMemberRole.MEMBER,
+      });
+      mockDb.refreshToken.create.mockResolvedValue({});
+      mockDb.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+
+      const tokens = await service.refreshTokens(`${TOKEN_ID}.real-secret`);
+
+      expect(mockDb.refreshToken.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: TOKEN_ID, revokedAt: null }) }),
+      );
+      expect(mockDb.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { id: TOKEN_ID, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(tokens.refreshToken).not.toBe(`${TOKEN_ID}.real-secret`);
+    });
+
+    it('should reject the loser of two concurrent refreshes with the same token', async () => {
+      mockDb.refreshToken.findFirst.mockResolvedValue({
+        id: TOKEN_ID,
+        userId: 'user-id',
+        tokenHash: await bcrypt.hash('real-secret', 4),
+        user: mockUser,
+      });
+      // The other request revoked it between our read and our write
+      mockDb.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.refreshTokens(`${TOKEN_ID}.real-secret`)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockDb.refreshToken.create).not.toHaveBeenCalled();
     });
   });
 });

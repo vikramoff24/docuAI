@@ -20,6 +20,7 @@ import {
   Max,
   IsArray,
   ArrayMaxSize,
+  MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
@@ -36,6 +37,7 @@ export class SearchQueryDto {
    * Used for embedding generation in semantic mode.
    */
   @IsString()
+  @MaxLength(500)
   q: string;
 
   /**
@@ -62,6 +64,7 @@ export class SearchQueryDto {
    */
   @IsOptional()
   @IsString()
+  @MaxLength(255)
   mimeType?: string;
 
   /**

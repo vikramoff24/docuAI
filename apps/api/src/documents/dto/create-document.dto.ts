@@ -9,12 +9,15 @@ import {
   IsInt,
   Min,
   Max,
+  ArrayMaxSize,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { Trim } from '../../common/transforms/string.transforms';
 
 export class CreateDocumentDto {
   @ApiProperty({ example: 'Q3 Financial Report.pdf' })
+  @Trim()
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
@@ -46,8 +49,9 @@ export class CreateDocumentDto {
 
   @ApiPropertyOptional({ example: ['finance', 'q3', '2026'], type: [String] })
   @IsArray()
+  @ArrayMaxSize(20)
   @IsString({ each: true })
+  @MaxLength(50, { each: true })
   @IsOptional()
-  @Transform(({ value }) => (Array.isArray(value) ? value : []))
   tags?: string[];
 }

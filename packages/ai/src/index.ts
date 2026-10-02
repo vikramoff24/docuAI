@@ -28,7 +28,20 @@ export type {
   CompletionResult,
   EmbeddingResult,
   StreamChunk,
+  ToolDefinition,
+  ToolCall,
 } from './types/message.types';
 
 // Providers
 export { OpenAIProvider } from './providers/openai.provider';
+
+// Organization credentials (encrypted API keys)
+export {
+  loadCredentialsEncryptionKey,
+  encryptSecret,
+  decryptSecret,
+  resolveOpenAIKey,
+  keyHint,
+  OPENAI_KEY_PATTERN,
+} from './credentials/credentials';
+export type { ApiKeySource, ResolvedApiKey } from './credentials/credentials';

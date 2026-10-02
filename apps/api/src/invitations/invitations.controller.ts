@@ -21,9 +21,11 @@ import {
   Delete,
   Body,
   Param,
+  ParseUUIDPipe,
   HttpCode,
   HttpStatus,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -34,6 +36,7 @@ import {
 
 import { InvitationsService } from './invitations.service';
 import { CreateInvitationDto } from './dto/create-invitation.dto';
+import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
@@ -95,7 +98,7 @@ export class InvitationsController {
   @ApiResponse({ status: 404, description: 'Invitation not found' })
   async cancelInvitation(
     @CurrentUser() user: RequestUser,
-    @Param('id') invitationId: string,
+    @Param('id', ParseUUIDPipe) invitationId: string,
   ) {
     await this.invitationsService.cancelInvitation(
       invitationId,
@@ -109,6 +112,13 @@ export class InvitationsController {
   // Public endpoint — no JWT required (user may not have a token yet)
   // ──────────────────────────────────────────────────
 
+  @Get('invitations/preview')
+  @ApiOperation({ summary: 'Public: who invited whom to which organization (for the invite landing page)' })
+  @ApiResponse({ status: 404, description: 'Unknown token' })
+  async previewInvitation(@Query('token', ParseUUIDPipe) token: string) {
+    return this.invitationsService.previewInvitation(token);
+  }
+
   @Post('invitations/accept')
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)  // Accepting requires the user to be logged in
@@ -120,7 +130,7 @@ export class InvitationsController {
   @ApiResponse({ status: 409, description: 'Invitation already accepted/cancelled' })
   async acceptInvitation(
     @CurrentUser() user: RequestUser,
-    @Body() body: { token: string },
+    @Body() body: AcceptInvitationDto,
   ) {
     return this.invitationsService.acceptInvitation(body.token, user.email);
   }

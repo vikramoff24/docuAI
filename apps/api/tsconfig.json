@@ -21,13 +21,17 @@
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"]
     },
     "incremental": true,
+    // Inside outDir so `nest build` (deleteOutDir) also clears it; otherwise tsc
+    // believes the deleted output is up to date and skips emitting files.
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
     "strictPropertyInitialization": false
   },
-  "include": ["src/**/*", "test/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

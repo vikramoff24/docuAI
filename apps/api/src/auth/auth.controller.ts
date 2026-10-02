@@ -30,6 +30,7 @@ import { FastifyRequest } from 'fastify';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { RequestUser } from './strategies/jwt.strategy';
@@ -80,13 +81,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
   async refresh(
-    @Body() body: { refreshToken: string },
+    @Body() body: RefreshTokenDto,
     @Req() req: FastifyRequest,
   ) {
     const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0] ?? req.ip;
     const userAgent = req.headers['user-agent'];
 
-    return this.authService.refreshTokens(body.refreshToken, ipAddress, userAgent);
+    return this.authService.refreshTokens(body.refreshToken, ipAddress, userAgent, body.organizationId);
   }
 
   // ──────────────────────────────────────────────────
@@ -118,5 +119,18 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   getMe(@CurrentUser() user: RequestUser) {
     return user;
+  }
+
+  // ──────────────────────────────────────────────────
+  // GET /auth/organizations — for the organization switcher
+  // (switching itself is POST /auth/refresh with organizationId)
+  // ──────────────────────────────────────────────────
+
+  @Get('organizations')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: "List the organizations the current user belongs to" })
+  listOrganizations(@CurrentUser() user: RequestUser) {
+    return this.authService.listOrganizations(user.userId, user.organizationId);
   }
 }

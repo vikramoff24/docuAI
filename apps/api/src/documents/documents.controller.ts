@@ -9,7 +9,7 @@
  *   GET    /api/v1/documents/:id/download     → Get presigned download URL
  *   DELETE /api/v1/documents/:id              → Soft delete document
  *
- * All routes require JWT authentication.
+ * All routes require JWT authentication; writes require MEMBER or higher.
  * organizationId comes from the JWT — never from request body/params.
  */
 
@@ -18,6 +18,7 @@ import {
   Post,
   Get,
   Delete,
+  Patch,
   Body,
   Param,
   Query,
@@ -35,13 +36,16 @@ import {
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { ListDocumentsDto } from './dto/list-documents.dto';
+import { MoveDocumentDto } from './dto/move-document.dto';
+import { OrganizationMemberRole } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequestUser } from '../auth/strategies/jwt.strategy';
 
 @ApiTags('documents')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
@@ -52,6 +56,7 @@ export class DocumentsController {
 
   @Post('upload-url')
   @HttpCode(HttpStatus.CREATED)
+  @Roles(OrganizationMemberRole.MEMBER)
   @ApiOperation({
     summary: 'Get a presigned S3 URL for direct upload',
     description: `
@@ -80,6 +85,7 @@ export class DocumentsController {
 
   @Post(':id/confirm')
   @HttpCode(HttpStatus.OK)
+  @Roles(OrganizationMemberRole.MEMBER)
   @ApiOperation({
     summary: 'Confirm upload complete and trigger processing',
     description: 'Call after successfully uploading file to S3 using the presigned URL',
@@ -113,6 +119,24 @@ export class DocumentsController {
   }
 
   // ──────────────────────────────────────────────────
+  // Search-index health (declared before the ':id' routes)
+  // ──────────────────────────────────────────────────
+
+  @Get('index-status')
+  @ApiOperation({ summary: 'How many documents need reindexing (e.g. uploaded before an AI key was set)' })
+  async getIndexStatus(@CurrentUser() user: RequestUser) {
+    return this.documentsService.getIndexStatus(user.organizationId);
+  }
+
+  @Post('reindex')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Roles(OrganizationMemberRole.ADMIN)
+  @ApiOperation({ summary: 'Queue every document with an incomplete search index for processing (ADMIN+)' })
+  async reindex(@CurrentUser() user: RequestUser) {
+    return this.documentsService.reindexOrganization(user.organizationId, user.userId);
+  }
+
+  // ──────────────────────────────────────────────────
   // GET /documents/:id
   // ──────────────────────────────────────────────────
 
@@ -143,11 +167,42 @@ export class DocumentsController {
   }
 
   // ──────────────────────────────────────────────────
+  // PATCH /documents/:id — move between folders
+  // ──────────────────────────────────────────────────
+
+  @Patch(':id')
+  @Roles(OrganizationMemberRole.MEMBER)
+  @ApiOperation({ summary: 'Move a document to a folder (or out of folders with folderId: null)' })
+  async moveDocument(
+    @CurrentUser() user: RequestUser,
+    @Param('id') documentId: string,
+    @Body() dto: MoveDocumentDto,
+  ) {
+    return this.documentsService.moveDocument(documentId, user.organizationId, dto.folderId, user);
+  }
+
+  // ──────────────────────────────────────────────────
+  // POST /documents/:id/reprocess
+  // ──────────────────────────────────────────────────
+
+  @Post(':id/reprocess')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Roles(OrganizationMemberRole.MEMBER)
+  @ApiOperation({ summary: 'Run text extraction and indexing again for a READY or FAILED document' })
+  async reprocess(
+    @CurrentUser() user: RequestUser,
+    @Param('id') documentId: string,
+  ) {
+    return this.documentsService.reprocessDocument(documentId, user.organizationId, user);
+  }
+
+  // ──────────────────────────────────────────────────
   // DELETE /documents/:id
   // ──────────────────────────────────────────────────
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(OrganizationMemberRole.MEMBER)
   @ApiOperation({ summary: 'Soft delete a document' })
   @ApiResponse({ status: 204, description: 'Document deleted' })
   @ApiResponse({ status: 403, description: 'Not authorized to delete this document' })
@@ -160,6 +215,7 @@ export class DocumentsController {
       documentId,
       user.organizationId,
       user.userId,
+      user.role,
     );
   }
 }

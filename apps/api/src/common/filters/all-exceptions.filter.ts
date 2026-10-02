@@ -41,6 +41,14 @@ import {
 } from '@nestjs/common';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { Prisma } from '@prisma/client';
+
+/** Prisma error codes that mean "bad request", mapped to a safe status + message. */
+const PRISMA_CLIENT_ERRORS: Record<string, [number, string]> = {
+  P2002: [HttpStatus.CONFLICT, 'A record with these values already exists'],
+  P2023: [HttpStatus.BAD_REQUEST, 'Malformed identifier'],
+  P2025: [HttpStatus.NOT_FOUND, 'Record not found'],
+};
 
 interface ErrorResponse {
   statusCode: number;
@@ -49,6 +57,19 @@ interface ErrorResponse {
   requestId: string | undefined;
   timestamp: string;
   path: string;
+}
+
+/** Errors raised by Fastify itself carry an FST_* code and a 4xx statusCode. */
+function isFastifyClientError(e: unknown): e is Error & { statusCode: number; code: string } {
+  if (!(e instanceof Error)) return false;
+  const { statusCode, code } = e as Error & { statusCode?: unknown; code?: unknown };
+  return (
+    typeof code === 'string' &&
+    code.startsWith('FST_') &&
+    typeof statusCode === 'number' &&
+    statusCode >= 400 &&
+    statusCode < 500
+  );
 }
 
 @Catch()
@@ -88,6 +109,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode = 422;
       error = 'Unprocessable Entity';
       message = exception.errors.map((e) => `${e.path.join('.')}: ${e.message}`);
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError && PRISMA_CLIENT_ERRORS[exception.code]) {
+      // Constraint/lookup failures that reach here are caused by the request
+      // (duplicate key, malformed id, missing row) — not server faults.
+      [statusCode, message] = PRISMA_CLIENT_ERRORS[exception.code];
+      error = HttpStatus[statusCode] ?? 'Error';
+    } else if (isFastifyClientError(exception)) {
+      // Fastify rejects malformed requests before Nest sees them (e.g.
+      // FST_ERR_CTP_EMPTY_JSON_BODY). Those are client errors, not 500s.
+      statusCode = exception.statusCode;
+      error = HttpStatus[statusCode] ?? 'Bad Request';
+      message = exception.message;
     } else if (exception instanceof Error) {
       // Unhandled errors — log fully server-side, return generic message
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;

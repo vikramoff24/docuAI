@@ -18,7 +18,6 @@ import {
   HttpStatus,
   Res,
   ParseUUIDPipe,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
@@ -53,12 +52,7 @@ export class AIController {
     @CurrentUser() user: RequestUser,
     @Param('id', ParseUUIDPipe) documentId: string,
   ) {
-    if (!this.ragService.isAvailable()) {
-      throw new ServiceUnavailableException(
-        'AI service unavailable: OPENAI_API_KEY not configured',
-      );
-    }
-
+    // Not found / not ready / AI not configured are checked in that order by the service.
     this.logger.log(
       `Summarizing document ${documentId} for org ${user.organizationId}`,
     );

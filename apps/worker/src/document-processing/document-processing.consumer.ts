@@ -29,7 +29,7 @@ import {
   DOCUMENT_PROCESSING_QUEUE,
   DocumentProcessingJobs,
 } from './document-processing.constants';
-import { DocumentProcessingService } from './document-processing.service';
+import { DocumentProcessingService, ExtractionError } from './document-processing.service';
 
 export interface ProcessDocumentJobData {
   documentId: string;
@@ -59,6 +59,11 @@ export class DocumentProcessingConsumer {
       `Starting pipeline for document: ${documentId} (${fileName})`,
     );
 
+    if (!(await this.processingService.isDocumentProcessable(documentId))) {
+      this.logger.warn(`Skipping document ${documentId}: deleted before processing`);
+      return;
+    }
+
     try {
       // Stage 1: Extract text
       await job.progress(10);
@@ -80,10 +85,11 @@ export class DocumentProcessingConsumer {
         `Created ${chunks.length} chunks for document: ${documentId}`,
       );
 
-      // Stage 3: Generate embeddings (placeholder — AI provider needed)
+      // Stage 3: Generate embeddings (skipped when the org has no OpenAI key)
       const chunksWithEmbeddings = await this.processingService.generateEmbeddings(
         chunks,
         documentId,
+        organizationId,
       );
       await job.progress(80);
       this.logger.log(
@@ -105,11 +111,19 @@ export class DocumentProcessingConsumer {
         error instanceof Error ? error.stack : String(error),
       );
       // Mark document as failed in database
-      await this.processingService
-        .markDocumentFailed(documentId, error instanceof Error ? error.message : 'Unknown error')
-        .catch((e) =>
-          this.logger.error('Failed to mark document as failed', e),
-        );
+      // Only the last attempt marks the document FAILED; earlier ones leave it
+      // PROCESSING so the UI doesn't flip to "Failed" and back while retrying.
+      // Unreadable files fail the same way on every attempt, so don't retry them.
+      const permanent = error instanceof ExtractionError;
+      if (permanent) await job.discard();
+      const isLastAttempt = permanent || job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+      if (isLastAttempt && (await this.processingService.isDocumentProcessable(documentId))) {
+        await this.processingService
+          .markDocumentFailed(documentId, error instanceof Error ? error.message : 'Unknown error')
+          .catch((e) =>
+            this.logger.error('Failed to mark document as failed', e),
+          );
+      }
       throw error; // Re-throw so BullMQ retries the job
     }
   }

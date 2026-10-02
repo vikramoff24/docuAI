@@ -30,7 +30,6 @@ import {
 } from '@nestjs/platform-fastify';
 import request from 'supertest';
 import { PrismaClient } from '@prisma/client';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/all-exceptions.filter';
@@ -38,8 +37,6 @@ import { TransformInterceptor } from '../src/common/interceptors/transform.inter
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const LOCALSTACK_ENDPOINT = 'http://localhost:4566';
-const BUCKET = 'docuflow-dev';
 
 /** Upload a small text buffer directly to a LocalStack presigned URL using native fetch (Node 18+) */
 async function uploadToPresignedUrl(uploadUrl: string, content: Buffer, mimeType: string): Promise<void> {
@@ -53,23 +50,6 @@ async function uploadToPresignedUrl(uploadUrl: string, content: Buffer, mimeType
   if (!res.ok) {
     throw new Error(`Failed to upload to presigned URL: ${res.status} ${res.statusText}`);
   }
-}
-
-/** Fallback: upload using AWS SDK directly (bypassing presigned URL) */
-async function uploadDirectlyToS3(storageKey: string, content: Buffer, mimeType: string): Promise<void> {
-  const s3 = new S3Client({
-    region: 'us-east-1',
-    credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
-    endpoint: LOCALSTACK_ENDPOINT,
-    forcePathStyle: true,
-  });
-
-  await s3.send(new PutObjectCommand({
-    Bucket: BUCKET,
-    Key: storageKey,
-    Body: content,
-    ContentType: mimeType,
-  }));
 }
 
 // ── Test users ────────────────────────────────────────────────────────────────
@@ -110,6 +90,7 @@ describe('Documents Integration Tests', () => {
   // Test document state
   let documentId: string;
   let storageKey: string;
+  let uploadUrl: string;
 
   // Test folder state
   let folderId: string;
@@ -268,6 +249,7 @@ describe('Documents Integration Tests', () => {
       // Save for subsequent tests
       documentId = res.body.data.documentId;
       storageKey = res.body.data.storageKey;
+      uploadUrl = res.body.data.uploadUrl;
 
       // Verify document was created in DB with PENDING status
       const doc = await prisma.document.findUnique({ where: { id: documentId } });
@@ -291,9 +273,9 @@ describe('Documents Integration Tests', () => {
     });
 
     it('should confirm upload after file is present in S3', async () => {
-      // Upload the file directly to LocalStack S3
+      // Upload through the presigned URL, exactly as the browser does
       const fileContent = Buffer.from('Integration test document content');
-      await uploadDirectlyToS3(storageKey, fileContent, 'text/plain');
+      await uploadToPresignedUrl(uploadUrl, fileContent, 'text/plain');
 
       // Now confirm the upload
       const res = await request(app.getHttpServer())
@@ -352,7 +334,8 @@ describe('Documents Integration Tests', () => {
       const ourDoc = res.body.data.items.find((d: { id: string }) => d.id === documentId);
       expect(ourDoc).toBeTruthy();
       expect(ourDoc.name).toBe('integration-test.txt');
-      expect(ourDoc.status).toBe('PROCESSING');
+      // A running worker may already have processed the file
+      expect(['PROCESSING', 'READY']).toContain(ourDoc.status);
     });
 
     it('should support search by name', async () => {
@@ -398,7 +381,8 @@ describe('Documents Integration Tests', () => {
       expect(res.body.data.id).toBe(documentId);
       expect(res.body.data.name).toBe('integration-test.txt');
       expect(res.body.data.mimeType).toBe('text/plain');
-      expect(res.body.data.status).toBe('PROCESSING');
+      // A running worker may already have processed the file
+      expect(['PROCESSING', 'READY']).toContain(res.body.data.status);
       expect(res.body.data.tags).toEqual(['test', 'integration']);
       expect(res.body.data.description).toBe('Integration test document');
       // Should include creator info

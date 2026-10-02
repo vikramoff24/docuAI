@@ -41,12 +41,11 @@ import {
   Injectable,
   Logger,
   BadRequestException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 
 import { DatabaseService } from '../database/database.service';
+import { AiCredentialsService } from '../ai/ai-credentials.service';
 import { SearchMode, SearchQueryDto } from './dto/search-query.dto';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -102,20 +101,12 @@ export interface SearchResponse {
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
-  private readonly openaiApiKey: string | undefined;
 
   constructor(
     private readonly db: DatabaseService,
-    config: ConfigService,
-  ) {
-    this.openaiApiKey = config.get<string>('OPENAI_API_KEY');
-    if (!this.openaiApiKey) {
-      this.logger.warn(
-        'OPENAI_API_KEY not set — semantic search will be unavailable. ' +
-          'Hybrid search will fall back to fulltext only.',
-      );
-    }
-  }
+    /** Resolves the org's OpenAI key (Settings) or the server-wide OPENAI_API_KEY. */
+    private readonly credentials: AiCredentialsService,
+  ) {}
 
   // ──────────────────────────────────────────────────────────────────────────
   // PUBLIC API
@@ -173,25 +164,29 @@ export class SearchService {
   // MODE 1: FULLTEXT SEARCH
   // ──────────────────────────────────────────────────────────────────────────
 
+  /** Optional folder / MIME / tag filters, always as bound parameters. */
+  private buildFilters({ folderId, mimeType, tags }: SearchQueryDto): Prisma.Sql {
+    const parts: Prisma.Sql[] = [];
+    if (folderId) parts.push(Prisma.sql`AND d."folderId" = ${folderId}::uuid`);
+    if (mimeType) {
+      // Prefix match ("image/" matches every image type); LIKE wildcards in the input are literal.
+      const prefix = mimeType.replace(/[\\%_]/g, (c) => `\\${c}`);
+      parts.push(Prisma.sql`AND d."mimeType" LIKE ${prefix + '%'}`);
+    }
+    if (tags && tags.length > 0) parts.push(Prisma.sql`AND d."tags" @> ${tags}::text[]`);
+    return parts.length > 0 ? Prisma.join(parts, ' ') : Prisma.empty;
+  }
+
+  /**
+   * Matches the document's name/description/tags (searchVector) OR its
+   * extracted text (chunk content), so body text is findable without an
+   * OpenAI key. The snippet comes from the best-matching chunk when there is one.
+   */
   private async fulltextSearch(
     organizationId: string,
     dto: SearchQueryDto,
   ): Promise<SearchResultItem[]> {
-    const { q, folderId, mimeType, tags, limit = 10, offset = 0 } = dto;
-
-    // Build optional filter fragments
-    const folderFilter = folderId
-      ? Prisma.sql`AND d."folderId" = ${folderId}::uuid`
-      : Prisma.sql``;
-
-    const mimeFilter = mimeType
-      ? Prisma.sql`AND d."mimeType" LIKE ${mimeType + '%'}`
-      : Prisma.sql``;
-
-    const tagsFilter =
-      tags && tags.length > 0
-        ? Prisma.sql`AND d."tags" @> ${tags}::text[]`
-        : Prisma.sql``;
+    const { q, limit = 10, offset = 0 } = dto;
 
     const rows = await this.db.$queryRaw<
       Array<{
@@ -209,6 +204,18 @@ export class SearchService {
         headline: string;
       }>
     >`
+      WITH q AS (SELECT plainto_tsquery('english', ${q}) AS query),
+      chunk_hits AS (
+        SELECT DISTINCT ON (c."documentId")
+          c."documentId",
+          c."content",
+          ts_rank_cd(to_tsvector('english', c."content"), q.query) AS rank
+        FROM "document_chunks" c, q
+        WHERE
+          c."organizationId" = ${organizationId}::uuid
+          AND to_tsvector('english', c."content") @@ q.query
+        ORDER BY c."documentId", rank DESC
+      )
       SELECT
         d."id",
         d."name",
@@ -220,24 +227,23 @@ export class SearchService {
         d."folderId",
         f."name" AS "folderName",
         d."createdAt",
-        ts_rank_cd(d."searchVector", query) AS score,
+        COALESCE(ts_rank_cd(d."searchVector", q.query), 0) + COALESCE(ch.rank, 0) AS score,
         ts_headline(
           'english',
-          COALESCE(d."description", d."name"),
-          query,
+          COALESCE(ch."content", d."description", d."name"),
+          q.query,
           'MaxWords=20, MinWords=5, StartSel=<mark>, StopSel=</mark>, MaxFragments=3'
         ) AS headline
       FROM "documents" d
+      CROSS JOIN q
       LEFT JOIN "folders" f ON d."folderId" = f."id"
-      , plainto_tsquery('english', ${q}) AS query
+      LEFT JOIN chunk_hits ch ON ch."documentId" = d."id"
       WHERE
         d."organizationId" = ${organizationId}::uuid
         AND d."deletedAt" IS NULL
         AND d."status" = 'READY'
-        AND d."searchVector" @@ query
-        ${folderFilter}
-        ${mimeFilter}
-        ${tagsFilter}
+        AND (d."searchVector" @@ q.query OR ch."documentId" IS NOT NULL)
+        ${this.buildFilters(dto)}
       ORDER BY score DESC, d."createdAt" DESC
       LIMIT ${limit}
       OFFSET ${offset}
@@ -268,33 +274,22 @@ export class SearchService {
     organizationId: string,
     dto: SearchQueryDto,
   ): Promise<SearchResultItem[]> {
-    if (!this.openaiApiKey) {
-      this.logger.warn('Semantic search requested but OPENAI_API_KEY not set. Falling back to fulltext.');
+    const resolved = await this.credentials.resolveOpenAIKey(organizationId);
+    if (!resolved) {
+      this.logger.warn('Semantic search requested but no OpenAI key is configured. Falling back to fulltext.');
       return this.fulltextSearch(organizationId, { ...dto, mode: SearchMode.FULLTEXT });
     }
 
-    const { q, folderId, mimeType, tags, limit = 10, offset = 0 } = dto;
+    const { q, limit = 10, offset = 0 } = dto;
 
     // Generate query embedding
-    const queryEmbedding = await this.generateQueryEmbedding(q);
-    const embeddingLiteral = this.formatEmbeddingForSQL(queryEmbedding);
-
-    const folderFilter = folderId
-      ? Prisma.sql`AND d."folderId" = ${folderId}::uuid`
-      : Prisma.sql``;
-
-    const mimeFilter = mimeType
-      ? Prisma.sql`AND d."mimeType" LIKE ${mimeType + '%'}`
-      : Prisma.sql``;
-
-    const tagsFilter =
-      tags && tags.length > 0
-        ? Prisma.sql`AND d."tags" @> ${tags}::text[]`
-        : Prisma.sql``;
+    const queryEmbedding = await this.generateQueryEmbedding(q, resolved.apiKey);
+    const embedding = this.formatEmbeddingForSQL(queryEmbedding);
 
     // Semantic search: find top-k chunks by cosine similarity, then
-    // group by document to get the best match per document
-    const rows = await this.db.$queryRawUnsafe<
+    // group by document to get the best match per document.
+    // Every value is a bound parameter — never interpolate user input here.
+    const rows = await this.db.$queryRaw<
       Array<{
         id: string;
         name: string;
@@ -311,22 +306,22 @@ export class SearchService {
         chunkIndex: number;
         chunkSimilarity: number;
       }>
-    >(`
+    >`
       WITH ranked_chunks AS (
         SELECT
           c."documentId",
           c."content" AS "chunkContent",
           c."chunkIndex",
-          1 - (c."embedding" <=> '${embeddingLiteral}'::vector) AS similarity,
+          1 - (c."embedding" <=> ${embedding}::vector) AS similarity,
           ROW_NUMBER() OVER (
             PARTITION BY c."documentId"
-            ORDER BY c."embedding" <=> '${embeddingLiteral}'::vector ASC
+            ORDER BY c."embedding" <=> ${embedding}::vector ASC
           ) AS rn
         FROM "document_chunks" c
         WHERE
-          c."organizationId" = '${organizationId}'
+          c."organizationId" = ${organizationId}::uuid
           AND c."embedding" IS NOT NULL
-        ORDER BY c."embedding" <=> '${embeddingLiteral}'::vector ASC
+        ORDER BY c."embedding" <=> ${embedding}::vector ASC
         LIMIT 200
       )
       SELECT
@@ -349,16 +344,14 @@ export class SearchService {
       LEFT JOIN "folders" f ON d."folderId" = f."id"
       WHERE
         rc.rn = 1
-        AND d."organizationId" = '${organizationId}'
+        AND d."organizationId" = ${organizationId}::uuid
         AND d."deletedAt" IS NULL
         AND d."status" = 'READY'
-        ${folderId ? `AND d."folderId" = '${folderId}'` : ''}
-        ${mimeType ? `AND d."mimeType" LIKE '${mimeType}%'` : ''}
-        ${tags && tags.length > 0 ? `AND d."tags" @> ARRAY[${tags.map((t) => `'${t.replace(/'/g, "''")}'`).join(',')}]::text[]` : ''}
+        ${this.buildFilters(dto)}
       ORDER BY rc.similarity DESC
       LIMIT ${limit}
       OFFSET ${offset}
-    `);
+    `;
 
     return rows.map((row) => ({
       id: row.id,
@@ -392,7 +385,7 @@ export class SearchService {
     dto: SearchQueryDto,
   ): Promise<SearchResultItem[]> {
     // If no API key, fall back to fulltext only
-    if (!this.openaiApiKey) {
+    if (!(await this.credentials.resolveOpenAIKey(organizationId))) {
       this.logger.debug('No API key — hybrid search falling back to fulltext');
       return this.fulltextSearch(organizationId, { ...dto, mode: SearchMode.FULLTEXT });
     }
@@ -458,15 +451,11 @@ export class SearchService {
   // EMBEDDING GENERATION
   // ──────────────────────────────────────────────────────────────────────────
 
-  private async generateQueryEmbedding(query: string): Promise<number[]> {
-    if (!this.openaiApiKey) {
-      throw new ServiceUnavailableException('Semantic search unavailable: OPENAI_API_KEY not configured');
-    }
-
+  private async generateQueryEmbedding(query: string, apiKey: string): Promise<number[]> {
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${this.openaiApiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -509,7 +498,9 @@ export class SearchService {
     organizationId: string,
     query: string,
   ): Promise<Array<{ id: string; name: string; mimeType: string }>> {
-    const pattern = `%${query}%`;
+    // The query is matched literally: escape LIKE wildcards typed by the user.
+    const literal = query.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const pattern = `%${literal}%`;
 
     const rows = await this.db.$queryRaw<
       Array<{ id: string; name: string; mimeType: string }>
@@ -526,7 +517,7 @@ export class SearchService {
         AND d."name" ILIKE ${pattern}
       ORDER BY
         -- Prefix matches first, then trigram similarity
-        (d."name" ILIKE ${query + '%'}) DESC,
+        (d."name" ILIKE ${literal + '%'}) DESC,
         similarity(d."name", ${query}) DESC,
         d."name" ASC
       LIMIT 8

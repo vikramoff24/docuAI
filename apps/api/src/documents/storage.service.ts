@@ -78,6 +78,12 @@ export class StorageService {
       credentials: { accessKeyId, secretAccessKey },
       // endpoint is only set for local dev (LocalStack)
       ...(endpoint ? { endpoint, forcePathStyle } : {}),
+      // SDK >= 3.729 adds a CRC32 checksum to every PutObject by default. For a
+      // presigned URL that checksum is computed over an empty body and baked
+      // into the query string, so S3 rejects the browser's real upload with 400.
+      // Only send checksums when an operation requires them.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
 
     this.logger.log(`Storage initialized: bucket=${this.bucket}, endpoint=${endpoint ?? 'AWS'}`);
@@ -145,14 +151,19 @@ export class StorageService {
   // ──────────────────────────────────────────────────
 
   async objectExists(storageKey: string): Promise<boolean> {
+    return (await this.getObjectSize(storageKey)) !== null;
+  }
+
+  /** Size in bytes of a stored object, or null if it doesn't exist. */
+  async getObjectSize(storageKey: string): Promise<number | null> {
     try {
-      await this.s3.send(new HeadObjectCommand({
+      const head = await this.s3.send(new HeadObjectCommand({
         Bucket: this.bucket,
         Key: storageKey,
       }));
-      return true;
+      return head.ContentLength ?? 0;
     } catch {
-      return false;
+      return null;
     }
   }
 
