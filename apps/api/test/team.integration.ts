@@ -507,6 +507,117 @@ describe('Team & workspace', () => {
       await http().get('/api/v1/documents?folderId=elsewhere').set(auth(owner)).expect(422);
     });
 
+    describe('renaming and moving folders', () => {
+      const create = async (s: Session, name: string, parentId?: string) =>
+        (await http().post('/api/v1/folders').set(auth(s)).send({ name, parentId }).expect(201)).body.data as {
+          id: string;
+          path: string;
+        };
+      const paths = async (s: Session) =>
+        (await http().get('/api/v1/folders/all').set(auth(s)).expect(200)).body.data.map((f: { path: string }) => f.path);
+
+      let o: Session;
+      beforeEach(async () => {
+        o = await login(await register('fm-owner'));
+      });
+
+      it('renames a folder and rewrites every descendant path, keeping documents inside', async () => {
+        const a = await create(o, 'Clients');
+        const b = await create(o, 'Acme', a.id);
+        await create(o, '2026', b.id);
+        // Sibling sharing the prefix must not be touched
+        await create(o, 'Clients Archive');
+        const doc = await createDocument(o, `in-acme-${runId}.txt`, { folderId: b.id });
+
+        const res = await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ name: ' Customers ' }).expect(200);
+        expect(res.body.data).toEqual(expect.objectContaining({ id: a.id, name: 'Customers', path: '/Customers' }));
+        expect(await paths(o)).toEqual(['/Clients Archive', '/Customers', '/Customers/Acme', '/Customers/Acme/2026']);
+
+        const inB = await http().get(`/api/v1/documents?folderId=${b.id}`).set(auth(o)).expect(200);
+        expect(inB.body.data.items.map((d: { id: string }) => d.id)).toEqual([doc.id]);
+
+        const audit = await prisma.auditLog.findFirstOrThrow({ where: { resourceId: a.id, action: 'FOLDER_UPDATED' } });
+        expect(audit.metadata).toEqual({ from: '/Clients', to: '/Customers' });
+      });
+
+      it('moves a subtree under another folder and back to the top level', async () => {
+        const a = await create(o, 'Projects');
+        const b = await create(o, 'Apollo', a.id);
+        await create(o, 'Specs', b.id);
+        const archive = await create(o, 'Archive');
+
+        await http().patch(`/api/v1/folders/${b.id}`).set(auth(o)).send({ parentId: archive.id }).expect(200);
+        expect(await paths(o)).toEqual(['/Archive', '/Archive/Apollo', '/Archive/Apollo/Specs', '/Projects']);
+        const children = await http().get(`/api/v1/folders?parentId=${archive.id}`).set(auth(o)).expect(200);
+        expect(children.body.data.map((f: { id: string }) => f.id)).toEqual([b.id]);
+        expect(await prisma.auditLog.count({ where: { resourceId: b.id, action: 'FOLDER_MOVED' } })).toBe(1);
+
+        // Move + rename in one request, to the top level
+        await http().patch(`/api/v1/folders/${b.id}`).set(auth(o)).send({ parentId: null, name: 'Apollo (2026)' }).expect(200);
+        expect(await paths(o)).toEqual(['/Apollo (2026)', '/Apollo (2026)/Specs', '/Archive', '/Projects']);
+        const top = await http().get('/api/v1/folders').set(auth(o)).expect(200);
+        expect(top.body.data.map((f: { id: string }) => f.id)).toContain(b.id);
+      });
+
+      it('rejects cycles, name clashes, the root folder and bad input', async () => {
+        const a = await create(o, 'A');
+        const b = await create(o, 'B', a.id);
+        await create(o, 'Taken');
+        const root = await prisma.folder.findFirstOrThrow({ where: { organizationId: o.orgId, path: '/' } });
+
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ parentId: a.id }).expect(409);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ parentId: b.id }).expect(409);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ name: 'Taken' }).expect(409);
+        await http().patch(`/api/v1/folders/${b.id}`).set(auth(o)).send({ parentId: null, name: 'Taken' }).expect(409);
+        await http().patch(`/api/v1/folders/${root.id}`).set(auth(o)).send({ name: 'x' }).expect(409);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({}).expect(422);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ name: 'a/b' }).expect(422);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ name: '   ' }).expect(422);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ parentId: 'nope' }).expect(422);
+        await http().patch(`/api/v1/folders/not-a-uuid`).set(auth(o)).send({ name: 'x' }).expect(400);
+        expect(await paths(o)).toEqual(['/A', '/A/B', '/Taken']);
+
+        // Moving into the hidden root folder is the same as the top level
+        await http().patch(`/api/v1/folders/${b.id}`).set(auth(o)).send({ parentId: root.id }).expect(200);
+        expect(await paths(o)).toEqual(['/A', '/B', '/Taken']);
+        // A no-op rename succeeds without an audit entry
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ name: 'A' }).expect(200);
+        expect(await prisma.auditLog.count({ where: { resourceId: a.id } })).toBe(0);
+      });
+
+      it('enforces roles and tenant boundaries', async () => {
+        const a = await create(o, 'Mine');
+        const v = await teammate(o, 'fm-viewer', 'VIEWER');
+        const m = await teammate(o, 'fm-member', 'MEMBER');
+        const outsider = await login(await register('fm-outsider'));
+        const theirs = await create(outsider, 'Theirs');
+
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(v)).send({ name: 'Nope' }).expect(403);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(outsider)).send({ name: 'Nope' }).expect(404);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(o)).send({ parentId: theirs.id }).expect(404);
+        await http().patch(`/api/v1/folders/${a.id}`).set(auth(m)).send({ name: 'Ours' }).expect(200);
+        expect(await paths(outsider)).toEqual(['/Theirs']);
+      });
+
+      it('serializes concurrent changes: no duplicate names, no cycles', async () => {
+        const [r1, r2] = await Promise.all([
+          http().post('/api/v1/folders').set(auth(o)).send({ name: 'Race' }),
+          http().post('/api/v1/folders').set(auth(o)).send({ name: 'Race' }),
+        ]);
+        expect([r1.status, r2.status].sort()).toEqual([201, 409]);
+
+        const x = await create(o, 'X');
+        const y = await create(o, 'Y');
+        const [m1, m2] = await Promise.all([
+          http().patch(`/api/v1/folders/${x.id}`).set(auth(o)).send({ parentId: y.id }),
+          http().patch(`/api/v1/folders/${y.id}`).set(auth(o)).send({ parentId: x.id }),
+        ]);
+        expect([m1.status, m2.status].sort()).toEqual([200, 409]);
+        const all: string[] = await paths(o);
+        expect(all.filter((p) => p.includes('/X') || p.includes('/Y'))).toHaveLength(2);
+      });
+    });
+
     it('reprocesses READY/FAILED documents once, with the same permissions as delete', async () => {
       const failed = await createDocument(member, `failed-${runId}.pdf`, { status: 'FAILED', processingError: 'boom' });
 

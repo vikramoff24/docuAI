@@ -241,6 +241,68 @@ test.describe("folders", () => {
     await expect(page.getByRole("button", { name: /^Contracts/ })).toHaveCount(0);
   });
 
+  test("rename a folder and move it, with its contents, into another folder and back", async ({ page }) => {
+    await signUp(page, uniqueEmail("folder-move"), "Folder Move Co");
+    const createFolder = async (name: string) => {
+      await page.getByRole("button", { name: "New folder" }).click();
+      await page.getByLabel("Folder name").fill(name);
+      await page.getByRole("button", { name: "Create", exact: true }).click();
+      await expect(page.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
+    };
+    await createFolder("Clients");
+    await createFolder("Archive");
+
+    // A document inside Clients
+    await page.getByRole("button", { name: /^Clients/ }).click();
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "acme.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Acme master services agreement."),
+    });
+    await expect(page.locator(".doc-row", { hasText: "acme.txt" }).getByText("✓ Ready")).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: "All documents" }).click();
+
+    // Rename: Escape cancels, a clash shows the API's reason, Enter saves
+    await page.getByLabel("Rename folder Clients").click();
+    await page.getByLabel("New folder name").fill("Nope");
+    await page.getByLabel("New folder name").press("Escape");
+    await expect(page.getByRole("button", { name: /^Clients/ })).toBeVisible();
+
+    await page.getByLabel("Rename folder Clients").click();
+    await page.getByLabel("New folder name").fill("Archive");
+    await page.getByLabel("New folder name").press("Enter");
+    await expect(page.locator(".auth-error")).toContainText("already exists");
+
+    await page.getByLabel("New folder name").fill("Customers");
+    await page.getByLabel("New folder name").press("Enter");
+    await expect(page.getByRole("button", { name: /^Customers/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Clients/ })).toHaveCount(0);
+    await expect(page.locator(".auth-error")).toHaveCount(0);
+
+    // Move Customers into Archive: it disappears from the top level and keeps its document
+    const options = await page.getByLabel("Move folder Customers").locator("option").allTextContents();
+    expect(options).toEqual(["Move…", "Archive"]); // not itself, not "Top level" (already there)
+    await page.getByLabel("Move folder Customers").selectOption({ label: "Archive" });
+    await expect(page.getByRole("button", { name: /^Customers/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Archive/ })).toContainText("1 folder");
+
+    await page.getByRole("button", { name: /^Archive/ }).click();
+    await page.getByRole("button", { name: /^Customers/ }).click();
+    await expect(page.getByRole("navigation", { name: "Folder" })).toContainText("Archive/Customers");
+    await expect(page.locator(".doc-row", { hasText: "acme.txt" })).toBeVisible();
+
+    // The document's own "Move…" lists the new path
+    const docOptions = await page.getByLabel("Move acme.txt").locator("option").allTextContents();
+    expect(docOptions).toContain("Archive");
+
+    // Back to the top level from inside Archive
+    await page.getByRole("navigation", { name: "Folder" }).getByRole("button", { name: "Archive" }).click();
+    await page.getByLabel("Move folder Customers").selectOption({ label: "Top level" });
+    await expect(page.getByText("This folder is empty")).toBeVisible();
+    await page.getByRole("button", { name: "All documents" }).click();
+    await expect(page.getByRole("button", { name: /^Customers/ })).toContainText("1 doc");
+  });
+
   test("a failed document can be retried", async ({ page }) => {
     await signUp(page, uniqueEmail("retry"), "Retry Co");
     await page.locator('input[type="file"]').setInputFiles({

@@ -255,6 +255,8 @@ function DocumentsPanel({ token, role, userId }: { token: string; role: string; 
   const [workspaceTotal, setWorkspaceTotal] = useState(0);
   const [newFolderName, setNewFolderName] = useState<string | null>(null);
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [savingFolder, setSavingFolder] = useState(false);
 
   const canUpload = role !== "VIEWER";
   const isAdmin = role === "ADMIN" || role === "OWNER";
@@ -326,6 +328,36 @@ function DocumentsPanel({ token, role, userId }: { token: string; role: string; 
     } catch (err) {
       setError(err instanceof ApiException ? err.message : "Couldn't delete the folder");
     }
+  }
+
+  async function handleUpdateFolder(folder: Folder, change: { name?: string; parentId?: string | null }) {
+    if (savingFolder) return;
+    setSavingFolder(true);
+    setError("");
+    try {
+      await foldersApi.update(token, folder.id, change);
+      setRenaming(null);
+      await reloadDocuments();
+    } catch (err) {
+      setError(err instanceof ApiException ? err.details.join(" · ") : "Couldn't update the folder");
+    } finally {
+      setSavingFolder(false);
+    }
+  }
+
+  function handleRenameSubmit(e: React.FormEvent, folder: Folder) {
+    e.preventDefault();
+    const name = renaming?.name.trim();
+    if (!name) return;
+    if (name === folder.name) setRenaming(null);
+    else void handleUpdateFolder(folder, { name });
+  }
+
+  /** Where a folder can go: anywhere except itself, its subfolders and where it already is. */
+  function folderDestinations(folder: Folder) {
+    return allFolders.filter(
+      (f) => f.id !== folder.id && !f.path.startsWith(`${folder.path}/`) && f.id !== currentFolder?.id
+    );
   }
 
   async function handleMove(doc: Document, folderId: string | null) {
@@ -564,7 +596,24 @@ function DocumentsPanel({ token, role, userId }: { token: string; role: string; 
             const empty = (f._count?.documents ?? 0) + (f._count?.children ?? 0) === 0;
             return (
               <div key={f.id} className="folder-row glass-card">
-                <button className="folder-open" onClick={() => openFolder([...folderPath, { id: f.id, name: f.name }])}>
+                {renaming?.id === f.id ? (
+                  <form className="folder-rename" onSubmit={(e) => handleRenameSubmit(e, f)} aria-label={`Rename folder ${f.name}`}>
+                    <input
+                      className="form-input"
+                      aria-label="New folder name"
+                      value={renaming.name}
+                      onChange={(e) => setRenaming({ id: f.id, name: e.target.value })}
+                      onKeyDown={(e) => e.key === "Escape" && setRenaming(null)}
+                      maxLength={255}
+                      autoFocus
+                    />
+                    <button type="submit" className="btn-primary" disabled={savingFolder || !renaming.name.trim()} style={{ padding: "8px 14px", fontSize: "13px" }}>
+                      <span>{savingFolder ? "Saving…" : "Save"}</span>
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => setRenaming(null)}>Cancel</button>
+                  </form>
+                ) : (
+                <button className="folder-open" title={f.name} onClick={() => openFolder([...folderPath, { id: f.id, name: f.name }])}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="hsl(40, 90%, 55%, 0.25)" stroke="hsl(40, 90%, 60%)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                   </svg>
@@ -574,7 +623,37 @@ function DocumentsPanel({ token, role, userId }: { token: string; role: string; 
                     {f._count?.children ? ` · ${f._count.children} folder${f._count.children === 1 ? "" : "s"}` : ""}
                   </span>
                 </button>
-                {canUpload && empty && (
+                )}
+                {canUpload && renaming?.id !== f.id && (
+                  <button
+                    className="doc-action-btn"
+                    onClick={() => setRenaming({ id: f.id, name: f.name })}
+                    title="Rename folder"
+                    aria-label={`Rename folder ${f.name}`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                )}
+                {canUpload && renaming?.id !== f.id && (currentFolder || folderDestinations(f).length > 0) && (
+                  <select
+                    className="form-input doc-move"
+                    aria-label={`Move folder ${f.name}`}
+                    title="Move folder"
+                    value=""
+                    disabled={savingFolder}
+                    onChange={(e) => handleUpdateFolder(f, { parentId: e.target.value === "__root" ? null : e.target.value })}
+                  >
+                    <option value="" disabled>Move…</option>
+                    {currentFolder && <option value="__root">Top level</option>}
+                    {folderDestinations(f).map((d) => (
+                      <option key={d.id} value={d.id}>{d.path.slice(1).split("/").join(" / ")}</option>
+                    ))}
+                  </select>
+                )}
+                {canUpload && empty && renaming?.id !== f.id && (
                   <button
                     className="doc-action-btn"
                     onClick={() => handleDeleteFolder(f)}

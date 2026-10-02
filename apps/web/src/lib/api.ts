@@ -299,6 +299,10 @@ export const foldersApi = {
   create: (token: string, data: { name: string; parentId?: string }) =>
     authedFetch(`/folders`, token, { method: "POST", body: JSON.stringify(data) }).then(handleResponse<Folder>),
 
+  /** Rename and/or move; `parentId: null` moves to the top level. Subfolders and documents move along. */
+  update: (token: string, id: string, data: { name?: string; parentId?: string | null }) =>
+    authedFetch(`/folders/${id}`, token, { method: "PATCH", body: JSON.stringify(data) }).then(handleResponse<Folder>),
+
   delete: (token: string, id: string) =>
     authedFetch(`/folders/${id}`, token, { method: "DELETE" }).then(handleResponse<void>),
 };

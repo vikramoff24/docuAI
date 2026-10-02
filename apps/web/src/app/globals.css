@@ -2060,7 +2060,7 @@ body {
 }
 .folder-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   gap: 8px;
   margin-bottom: 1rem;
 }
@@ -2088,6 +2088,27 @@ body {
 }
 .folder-open svg {
   grid-row: span 2;
+}
+.folder-row .doc-move {
+  width: 76px;
+  padding: 6px 4px 6px 8px;
+}
+.folder-rename {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px;
+}
+.folder-rename .form-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.folder-rename .btn-secondary {
+  padding: 8px 12px;
+  font-size: 0.8rem;
 }
 .folder-open:hover,
 .folder-open:focus-visible {

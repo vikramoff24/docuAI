@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Delete,
+  Patch,
   Body,
   Param,
   Query,
@@ -16,6 +17,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 
 import { FoldersService } from './folders.service';
 import { CreateFolderDto } from './dto/create-folder.dto';
+import { UpdateFolderDto } from './dto/update-folder.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard, Roles } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -54,6 +56,19 @@ export class FoldersController {
   @ApiOperation({ summary: 'List every folder in the organization (flat, ordered by path)' })
   async listAllFolders(@CurrentUser() user: RequestUser) {
     return this.foldersService.listAllFolders(user.organizationId);
+  }
+
+  @Patch(':id')
+  @Roles(OrganizationMemberRole.MEMBER)
+  @ApiOperation({ summary: 'Rename and/or move a folder (its contents move with it)' })
+  @ApiResponse({ status: 200, description: 'Folder updated' })
+  @ApiResponse({ status: 409, description: 'Name taken at the destination, root folder, or move into own subfolder' })
+  async updateFolder(
+    @CurrentUser() user: RequestUser,
+    @Param('id', ParseUUIDPipe) folderId: string,
+    @Body() dto: UpdateFolderDto,
+  ) {
+    return this.foldersService.updateFolder(folderId, user.organizationId, user.userId, dto);
   }
 
   @Delete(':id')

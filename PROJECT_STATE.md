@@ -167,12 +167,12 @@ Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░
    It has never run on GitHub. Creating the repo is outward-facing, so it was left for the user.
 3. ~~Enable rate limiting~~ ✅ 2026-10-02 (ADR-013).
 4. Next feature: Phase 6 extras with human approval for destructive tools, **or** Phase 7 observability.
-   Smaller open items below (folder rename/move, mobile layout) are good warm-ups.
+   The mobile dashboard layout (below) is a good smaller item.
 
 ### To fix later (from the 2026-10-01 teams/folders review)
 
 - [x] ~~Rate limiting is off everywhere~~: done 2026-10-02 (ADR-013).
-- [ ] **Folders:** add renaming folders and moving whole folders. Only documents can be moved today.
+- [x] ~~Folders: rename and move~~: done 2026-10-02.
 - [ ] **Mobile dashboard layout:** at phone widths the sidebar squeezes the content on every tab.
 - [ ] **Invitations by email:** add email delivery and email verification. Then invites can be sent instead of
   copied, and a "pending invites for you" inbox becomes safe (see ADR-012).
@@ -234,6 +234,19 @@ Infrastructure (local dev — ALL RUNNING ✅):
 ---
 
 ## Recent Changes
+
+- 2026-10-02: **Folder rename and move (end-to-end)**.
+  - API: `PATCH /folders/:id { name?, parentId? }` (MEMBER+). One transaction rewrites the materialized path of the folder
+    and its whole subtree. It rejects moving a folder into itself or a subfolder, the root folder, and names already
+    taken at the destination (409). Audited as `FOLDER_UPDATED` (rename) or `FOLDER_MOVED`. The hidden "/" folder counts
+    as the top level.
+  - **Concurrency fix:** create, update and delete take a per-org `pg_advisory_xact_lock`. Duplicate names from
+    concurrent creates (a known issue) and cycles from two crossing moves are no longer possible.
+  - Web: Rename (inline; Enter saves, Esc cancels) and "Move…" on each folder tile. Move lists only valid destinations.
+    Full name shows on hover.
+  - Bug caught by the tests: Prisma sends JS numbers as `bigint`, and Postgres has no `substr(text, bigint)`, so `::int` is required.
+  - Tests: +5 integration (`team.integration.ts`: subtree paths, prefix-sibling safety, cycles, clashes, roles/tenancy,
+    concurrency), +1 Playwright journey (`team.spec.ts`).
 
 - 2026-10-02: **Rate limiting (end-to-end)**. See ADR-013.
   - Committed the Phase 6 + teams checkpoint as `17b0d75` after re-running typecheck, lint, unit and integration.
@@ -383,8 +396,10 @@ Infrastructure (local dev — ALL RUNNING ✅):
   share the proxy's IP and its rate limits, or (with `true`) anyone can spoof their IP. See ADR-013.
 - Rate limits are per IP (users behind one NAT share them); there is no per-account login limit (lock-out risk).
 - Invitations are shared as links (no email delivery or email verification yet). See ADR-012.
-- Folder rename and moving folders aren't supported (documents can be moved).
-- Folder-name uniqueness is checked in code only (no DB constraint), so two concurrent creates can produce a duplicate.
+- Folder-name uniqueness is enforced in code under a per-org advisory lock (no DB constraint). Writes that skip
+  `FoldersService` (seed scripts, manual SQL) can still create duplicates.
+- One API integration run out of five on 2026-10-02 had a single failing test that didn't reproduce in the next
+  four runs, and the log didn't record which test it was. Capture the failing test name if it happens again.
 - When running `pnpm dev`, restart the worker after pulling: it previously ran without `main.js` (see Recent Changes).
 
 ---
@@ -417,8 +432,11 @@ Infrastructure (local dev — ALL RUNNING ✅):
 
 ## Test Status
 
-Verified 2026-10-02 after rate limiting: typecheck ✅ · web lint ✅ · API unit 22/22 · API integration **165/165**
-(+ rate-limit 6) · **E2E 26/26** non-live (journey 12 · edge-cases 7 · team 7) on `RATE_LIMIT_MULTIPLIER=20 pnpm dev`;
+Verified 2026-10-02 after folder rename/move: typecheck ✅ · web lint ✅ · web + API build ✅ · API unit 22/22 · worker 7/7 ·
+API integration **170/170** (one unidentified flake in 5 runs, see Known Issues) · **E2E 27/27** non-live (journey 12 · edge-cases 7 ·
+team 8; ai-live 2 skipped without a key) on `RATE_LIMIT_MULTIPLIER=20 pnpm dev`.
+
+Earlier 2026-10-02 after rate limiting: API integration 165/165 · E2E 26/26 non-live;
 the 2 rate-limit journeys also pass at production limits. ai-live not re-run (no key this session; no AI code changed).
 
 Previously verified 2026-10-01 after the teams/folders increment (clean `pnpm dev` stack, live OpenAI): **26/26 E2E** (journey 10 · edge-cases 7 · team 7 · ai-live 2)

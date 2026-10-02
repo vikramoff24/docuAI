@@ -35,6 +35,10 @@ Tests: `apps/api/test/team.integration.ts`, `apps/web/e2e/team.spec.ts`, reindex
 Global + per-route limits per client IP, Redis-backed; `TRUST_PROXY` fixes IP spoofing. Design: `docs/adr/ADR-013-rate-limiting.md`.
 Tests: `apps/api/test/rate-limit.integration.ts`, "rate limiting" journeys in `apps/web/e2e/journey.spec.ts`.
 
+## Folder rename & move (2026-10-02) ✅
+`PATCH /folders/:id` rewrites subtree paths in one transaction; per-org advisory lock serializes folder changes
+(no duplicate names or cycles under concurrency). UI: rename + move on folder tiles. Tests in `team.integration.ts`, `team.spec.ts`.
+
 ## Next
 1. Push to a GitHub remote (user to create the repo) and get CI green.
 2. Phase 6 extras below, or Phase 7 observability.
