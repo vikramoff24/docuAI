@@ -15,6 +15,8 @@ build/
 .env
 .env.local
 .env.*.local
+.env.production
+deploy/backups/
 # Keep .env.example and .env.test committed
 !.env.example
 !.env.test

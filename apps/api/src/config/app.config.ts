@@ -37,6 +37,7 @@ export default () => ({
   // Storage (S3 / LocalStack)
   storage: {
     endpoint: process.env['STORAGE_ENDPOINT'] ?? 'http://localhost:4566',
+    publicEndpoint: process.env['STORAGE_PUBLIC_ENDPOINT'],
     region: process.env['STORAGE_REGION'] ?? 'us-east-1',
     accessKeyId: process.env['STORAGE_ACCESS_KEY_ID'] ?? 'test',
     secretAccessKey: process.env['STORAGE_SECRET_ACCESS_KEY'] ?? 'test',

@@ -62,6 +62,8 @@ export interface PresignedDownloadUrl {
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
   private readonly s3: S3Client;
+  /** Signs browser-facing URLs only (signing is local; this client never sends requests). */
+  private readonly signer: S3Client;
   private readonly bucket: string;
 
   constructor(private readonly config: ConfigService) {
@@ -73,18 +75,26 @@ export class StorageService {
 
     this.bucket = config.get<string>('storage.bucket', 'docuflow-dev');
 
-    this.s3 = new S3Client({
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      // endpoint is only set for local dev (LocalStack)
-      ...(endpoint ? { endpoint, forcePathStyle } : {}),
-      // SDK >= 3.729 adds a CRC32 checksum to every PutObject by default. For a
-      // presigned URL that checksum is computed over an empty body and baked
-      // into the query string, so S3 rejects the browser's real upload with 400.
-      // Only send checksums when an operation requires them.
-      requestChecksumCalculation: 'WHEN_REQUIRED',
-      responseChecksumValidation: 'WHEN_REQUIRED',
-    });
+    const clientFor = (url: string | undefined) =>
+      new S3Client({
+        region,
+        credentials: { accessKeyId, secretAccessKey },
+        // endpoint is only set for S3-compatible stores (LocalStack, MinIO)
+        ...(url ? { endpoint: url, forcePathStyle } : {}),
+        // SDK >= 3.729 adds a CRC32 checksum to every PutObject by default. For a
+        // presigned URL that checksum is computed over an empty body and baked
+        // into the query string, so S3 rejects the browser's real upload with 400.
+        // Only send checksums when an operation requires them.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
+      });
+
+    this.s3 = clientFor(endpoint);
+    // The API may reach storage on an internal address (e.g. http://minio:9000) that
+    // browsers can't. Presigned URLs embed the host in their signature, so they're
+    // signed for the public address instead (STORAGE_PUBLIC_ENDPOINT).
+    const publicEndpoint = config.get<string>('storage.publicEndpoint') || endpoint;
+    this.signer = publicEndpoint === endpoint ? this.s3 : clientFor(publicEndpoint);
 
     this.logger.log(`Storage initialized: bucket=${this.bucket}, endpoint=${endpoint ?? 'AWS'}`);
   }
@@ -104,7 +114,7 @@ export class StorageService {
       ContentType: mimeType,
     });
 
-    const uploadUrl = await getSignedUrl(this.s3, command, { expiresIn: expiresInSeconds });
+    const uploadUrl = await getSignedUrl(this.signer, command, { expiresIn: expiresInSeconds });
 
     return {
       uploadUrl,
@@ -126,7 +136,7 @@ export class StorageService {
       Key: storageKey,
     });
 
-    const downloadUrl = await getSignedUrl(this.s3, command, { expiresIn: expiresInSeconds });
+    const downloadUrl = await getSignedUrl(this.signer, command, { expiresIn: expiresInSeconds });
 
     return {
       downloadUrl,

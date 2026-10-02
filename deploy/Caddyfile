@@ -1,0 +1,38 @@
+# Caddy obtains and renews HTTPS certificates automatically for real hostnames.
+# APP_ADDRESS / S3_ADDRESS come from .env.production, e.g.
+#   app.203-0-113-5.sslip.io   s3.203-0-113-5.sslip.io
+# (an "http://" prefix serves plain HTTP — used only for local testing)
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_ADDRESS} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# API straight to NestJS: no Next.js hop, and streamed chat answers (SSE) flush immediately
+	handle /api/* {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy web:3000
+	}
+}
+
+# Object storage for presigned uploads/downloads. The Host header is passed through
+# unchanged, which the S3 signature covers.
+{$S3_ADDRESS} {
+	request_body {
+		max_size 110MB
+	}
+	reverse_proxy storage:8333
+}

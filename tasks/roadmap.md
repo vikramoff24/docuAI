@@ -146,12 +146,12 @@ Learning: Tool calling, agent loops, ReAct, prompt injection, AI security
 
 **Goal:** Automated pipeline from commit to production.
 
-- [ ] GitHub Actions: lint, typecheck, unit tests, integration tests, build
-- [ ] Docker images for API + Worker + Web
-- [ ] docker-compose.prod.yml
+- [x] GitHub Actions: lint, typecheck, unit tests, integration tests, build (+ E2E)
+- [x] Docker images for API + Worker + Web (one shared image)
+- [x] docker-compose.prod.yml (single VM, Caddy HTTPS; docs/deployment.md)
 - [ ] Environment configuration (dev, staging, prod)
-- [ ] Database migration on deploy
-- [ ] Health check verification post-deploy
+- [x] Database migration on deploy
+- [x] Health check verification post-deploy (deploy/deploy.sh)
 - [ ] Rollback strategy
 
 ---
@@ -160,9 +160,9 @@ Learning: Tool calling, agent loops, ReAct, prompt injection, AI security
 
 **Goal:** Production readiness.
 
-- [ ] E2E tests with Playwright
+- [x] E2E tests with Playwright
 - [ ] AI evaluation framework
-- [ ] Rate limiting
+- [x] Rate limiting (ADR-013)
 - [ ] CORS configuration
 - [ ] Helmet (security headers)
 - [ ] API documentation (OpenAPI/Swagger)

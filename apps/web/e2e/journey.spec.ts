@@ -131,7 +131,7 @@ test.describe("upload failures", () => {
   test("a failed storage upload shows an error and leaves no orphaned document", async ({ page }) => {
     await signUp(page, uniqueEmail("s3fail"));
     // Simulate storage being unreachable (e.g. CORS/network) for the presigned PUT.
-    await page.route(/docuflow-dev/, (route) =>
+    await page.route(/X-Amz-Signature=/, (route) =>
       route.request().method() === "PUT" ? route.abort() : route.continue()
     );
 
@@ -247,11 +247,23 @@ test.describe("rate limiting", () => {
         data: { email: "nobody@rate-limit.test", password: "WrongPass123!" },
       });
 
-    // Exhaust the login budget (its size depends on RATE_LIMIT_MULTIPLIER, so read it).
+    // This test needs its own rate-limit bucket (the extraHTTPHeaders IP above). Behind a proxy
+    // that overwrites X-Forwarded-For (Caddy in production) every test shares one bucket, and
+    // exhausting it would block sign-in for all of them, so it skips there.
     const first = await attempt();
     expect(first.status()).toBe(401);
     const limit = Number(first.headers()["x-ratelimit-limit-sustained"]);
     expect(limit).toBeGreaterThan(0);
+    const probe = await page.request.post("/api/v1/auth/login", {
+      headers: { "X-Forwarded-For": "198.19.0.1" },
+      data: { email: "nobody@rate-limit.test", password: "WrongPass123!" },
+    });
+    test.skip(
+      Number(probe.headers()["x-ratelimit-remaining-sustained"]) < limit - 1,
+      "client IP can't be isolated through this proxy"
+    );
+
+    // Exhaust the login budget (its size depends on RATE_LIMIT_MULTIPLIER, so read it).
     for (let i = 1; i < limit; i++) expect((await attempt()).status()).toBe(401);
 
     await page.goto("/login");

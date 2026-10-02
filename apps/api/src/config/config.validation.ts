@@ -38,6 +38,9 @@ const configSchema = z.object({
   STORAGE_SECRET_ACCESS_KEY: z.string().default('test'),
   STORAGE_BUCKET: z.string().default('docuflow-dev'),
   STORAGE_FORCE_PATH_STYLE: z.string().default('true'),
+  // Address browsers use for presigned upload/download URLs, when it differs from
+  // STORAGE_ENDPOINT (e.g. internal http://minio:9000 vs public https://s3.example.com)
+  STORAGE_PUBLIC_ENDPOINT: z.string().url().optional(),
 
   // AI (optional — not required if AI features not used)
   OPENAI_API_KEY: z.string().optional(),
@@ -73,6 +76,15 @@ export function validateConfig(config: Record<string, unknown>): AppConfig {
     console.error('❌ Invalid environment configuration:');
     console.error(result.error.format());
     throw new Error('Invalid environment configuration. Check the logs above.');
+  }
+
+  // Production never runs on the built-in development secrets: a missing
+  // JWT_ACCESS_SECRET would let anyone forge access tokens.
+  if (result.data.NODE_ENV === 'production') {
+    const missing = (['JWT_ACCESS_SECRET', 'AI_CREDENTIALS_ENCRYPTION_KEY'] as const).filter((k) => !result.data[k]);
+    if (missing.length) {
+      throw new Error(`Missing required production configuration: ${missing.join(', ')}`);
+    }
   }
 
   // Warn about missing JWT secrets in non-test environments

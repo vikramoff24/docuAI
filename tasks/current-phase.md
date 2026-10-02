@@ -39,8 +39,12 @@ Tests: `apps/api/test/rate-limit.integration.ts`, "rate limiting" journeys in `a
 `PATCH /folders/:id` rewrites subtree paths in one transaction; per-org advisory lock serializes folder changes
 (no duplicate names or cycles under concurrency). UI: rename + move on folder tiles. Tests in `team.integration.ts`, `team.spec.ts`.
 
+## Free deployment (2026-10-02) ✅ ready, not yet on a server
+Single-VM Docker Compose stack behind Caddy; guide in `docs/deployment.md` (Oracle Cloud Always Free).
+Verified locally: E2E suite against the production stack, backups, and refusal to start without secrets.
+
 ## Next
-1. Push to a GitHub remote (user to create the repo) and get CI green.
+1. User: create the Oracle VM and follow `docs/deployment.md`. Get GitHub CI green.
 2. Phase 6 extras below, or Phase 7 observability.
 
 ## Deferred to a later Phase 6 increment

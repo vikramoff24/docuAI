@@ -2,7 +2,7 @@
   "name": "@docuflow/api",
   "version": "0.1.0",
   "private": true,
-  "description": "DocuFlow AI \u2014 NestJS REST API",
+  "description": "DocuFlow AI — NestJS REST API",
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
@@ -40,6 +40,7 @@
     "bull": "^4.16.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "fastify": "4.28.1",
     "ioredis": "^5.4.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

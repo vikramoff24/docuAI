@@ -19,9 +19,9 @@
 
 ## Current Objective
 
-Phase 6 core is committed (`17b0d75`) and rate limiting is in place (ADR-013).
-Next: push to a GitHub remote so CI runs (needs the user to create/choose the repo). Then choose between the
-Phase 6 extras (approval-gated tools) and Phase 7 (observability). See `tasks/current-phase.md`.
+Code is on GitHub (https://github.com/vikramoff24/docuAI, public). A free single-VM production deployment is
+ready and verified locally (`docs/deployment.md`, Oracle Cloud Always Free). Next: the user creates the Oracle VM
+and runs the guide; get CI green on GitHub. Then Phase 6 extras or observability. See `tasks/current-phase.md`.
 
 **Development mode (from 2026-10-01):** features ship end-to-end. Frontend, backend, tests and docs move together,
 and a feature is only DONE after browser verification (Playwright journeys) and a security check.
@@ -129,7 +129,7 @@ Phase 3: Document Pipeline   █████████████████
 Phase 4: Search              ████████████████████  100% ✅
 Phase 5: AI (RAG)            ████████████████████  100% ✅
 Phase 6: AI Agent            ████████████████░░░░   80% ✅ core (extra tools deferred)
-Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░░░░    0%
+Deploy (roadmap Phase 8)     ██████████████░░░░░░   70% (single-VM stack verified locally; not yet on a server)
 ```
 
 ---
@@ -163,8 +163,9 @@ Phase 7: CI/CD + Deploy      ░░░░░░░░░░░░░░░░░
 ## In Progress / Next Session
 
 1. ~~Commit the Phase 6 work~~ ✅ `17b0d75` (2026-10-02).
-2. **Blocked on the user:** add a GitHub remote and push, then confirm `.github/workflows/ci.yml` goes green.
-   It has never run on GitHub. Creating the repo is outward-facing, so it was left for the user.
+2. ~~Push to GitHub~~ ✅ 2026-10-02 (`origin` = github.com/vikramoff24/docuAI). **Confirm CI goes green**: its first
+   run was on commits that predate the `fastify` dependency fix, so it was expected to fail at build.
+3. **Deploy (user):** follow `docs/deployment.md` on an Oracle Always Free VM.
 3. ~~Enable rate limiting~~ ✅ 2026-10-02 (ADR-013).
 4. Next feature: Phase 6 extras with human approval for destructive tools, **or** Phase 7 observability.
    The mobile dashboard layout (below) is a good smaller item.
@@ -234,6 +235,23 @@ Infrastructure (local dev — ALL RUNNING ✅):
 ---
 
 ## Recent Changes
+
+- 2026-10-02: **Free production deployment (single VM)**. See `docs/deployment.md`.
+  - `Dockerfile` (one image for API, worker and web), `docker-compose.prod.yml` (Postgres+pgvector, Redis with
+    password + AOF + noeviction, SeaweedFS S3, one-shot `migrate` and `storage-init`, Caddy with automatic HTTPS
+    and security headers). Only Caddy publishes ports. `deploy/init-env.sh` generates secrets,
+    `deploy/deploy.sh` builds and starts the stack and checks health, `deploy/backup.sh` does nightly DB + file backups.
+  - `STORAGE_PUBLIC_ENDPOINT`: presigned URLs are signed for the public S3 hostname while servers use the internal one.
+  - **Security:** in production the API used to fall back silently to a built-in JWT secret (forgeable tokens). It
+    now refuses to start without `JWT_ACCESS_SECRET` and `AI_CREDENTIALS_ENCRYPTION_KEY`.
+  - **Bug:** the API imported `fastify` without declaring it. It built locally only through stale `node_modules`, and
+    any clean install (Docker, CI) failed. Now a declared dependency.
+  - MinIO's images are no longer on Docker Hub, so storage is SeaweedFS (pinned `4.48`). Bucket and CORS setup is a
+    provider-neutral AWS SDK script (`deploy/storage-init.mjs`).
+  - Verified: the full stack runs locally behind Caddy, and the E2E suite against it is 26 passed, 3 skipped (2 need
+    an OpenAI key; the rate-limit journey skips because Caddy rightly ignores spoofed IPs). Backups and the missing-secret
+    refusal were checked by hand. Two E2E tests had dev-only assumptions (bucket name; per-test IP buckets) and were fixed.
+  - Code pushed to GitHub (public repo).
 
 - 2026-10-02: **Folder rename and move (end-to-end)**.
   - API: `PATCH /folders/:id { name?, parentId? }` (MEMBER+). One transaction rewrites the materialized path of the folder
@@ -476,7 +494,7 @@ Previously verified 2026-10-01 after the teams/folders increment (clean `pnpm de
 ## Current Git Branch & Commit
 
 - Branch: `main`. `17b0d75` = Phase 6 + teams checkpoint; rate limiting committed on top (see `git log`)
-- No remote configured yet
+- Remote: `origin` → https://github.com/vikramoff24/docuAI (public)
 
 ---
 
